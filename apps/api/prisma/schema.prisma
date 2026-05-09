@@ -1,4 +1,3 @@
-// This tells Prisma which database to use and where to find it
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,325 +6,333 @@ datasource db {
   provider = "postgresql"
 }
 
-// ─────────────────────────────────────────────
-// TENANTS — one per company/customer account
-// ─────────────────────────────────────────────
-model Tenant {
-  // Every row gets a unique random ID automatically
-  id        String   @id @default(uuid())
-  
-  // The company name e.g. "Acme Corp"
-  name      String
-  
-  // Which plan they are on
-  plan      String   @default("free") // "free" | "pro" | "agency"
-  
-  // Their Lemon Squeezy customer ID for billing lookups
-  lsCustomerId String?
-  
-  // Timestamps — Prisma fills these automatically
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  // Soft delete — we never hard delete tenants
-  // null means active, a date means deleted
-  deletedAt DateTime?
+//
+// ENUMS
+//
 
-  // Relations — a tenant has many users and many domains
-  users   User[]
-  domains Domain[]
-  
-  // Tell Prisma the table name in the database
+enum TenantPlan {
+  free
+  pro
+  agency
+}
+
+enum UserRole {
+  owner
+  admin
+  member
+}
+
+enum StatusType {
+  unknown
+  pass
+  fail
+  warn
+}
+
+enum SeverityType {
+  critical
+  warning
+  info
+}
+
+enum SuppressionEventType {
+  unsubscribe
+  spam_complaint
+  bounce
+}
+
+//
+// TENANTS
+//
+
+model Tenant {
+  id             String      @id @default(uuid())
+  name           String
+  plan           TenantPlan  @default(free)
+  lsCustomerId   String?
+
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+
+  users              User[]
+  domains            Domain[]
+  changeEvents       DnsChangeEvent[]
+  emailAnalyses      EmailAnalysis[]
+  suppressionEvents  SuppressionEvent[]
+  aiUsageLogs        AiUsageLog[]
+  auditLogs          AuditLog[]
+  unsubscribeTokens  UnsubscribeToken[]
+
   @@map("tenants")
 }
 
-// ─────────────────────────────────────────────
-// USERS — one per person, belongs to a tenant
-// ─────────────────────────────────────────────
+//
+// USERS
+//
+
 model User {
-  id       String  @id @default(uuid())
-  
-  // Clerk's user ID — we use this to link our user to Clerk's auth
-  clerkId  String  @unique
-  
-  email    String
-  
-  // Their role inside the tenant
-  role     String  @default("member") // "owner" | "admin" | "member"
-  
-  // Which tenant this user belongs to
-  tenantId String
-  tenant   Tenant  @relation(fields: [tenantId], references: [id])
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  deletedAt DateTime?
+  id         String     @id @default(uuid())
+
+  clerkId    String     @unique
+  email      String
+
+  role       UserRole   @default(member)
+
+  tenantId   String
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  deletedAt  DateTime?
 
   @@map("users")
-  // Fast lookup by clerkId (happens on every request)
+
   @@index([clerkId])
-  // Fast lookup of all users in a tenant
   @@index([tenantId])
+
+  @@unique([tenantId, email])
 }
 
-// ─────────────────────────────────────────────
-// DOMAINS — the core entity, one per domain being monitored
-// ─────────────────────────────────────────────
-model Domain {
-  id       String @id @default(uuid())
-  
-  // The actual domain string e.g. "acme.com"
-  domain   String
-  
-  // Which tenant owns this domain
-  tenantId String
-  tenant   Tenant @relation(fields: [tenantId], references: [id])
-  
-  // Current compliance status for each record type
-  // "unknown" = never checked, "pass" = good, "fail" = broken, "warn" = issues
-  spfStatus   String @default("unknown")
-  dkimStatus  String @default("unknown")
-  dmarcStatus String @default("unknown")
-  unsubStatus String @default("unknown")
-  
-  // Overall health score 0-100, calculated from all checks
-  healthScore Int @default(0)
-  
-  // Which ESP we detected from their test email
-  // e.g. "sendgrid", "mailgun", "google_workspace"
-  detectedEsp String?
-  
-  // When we last ran a full DNS check
-  lastCheckedAt DateTime?
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  deletedAt DateTime?
+//
+// DOMAINS
+//
 
-  // Relations
-  snapshots       DnsSnapshot[]
-  changeEvents    DnsChangeEvent[]
-  emailAnalyses   EmailAnalysis[]
-  suppressionEvents SuppressionEvent[]
-  
+model Domain {
+  id              String      @id @default(uuid())
+
+  domain          String
+
+  tenantId        String
+  tenant          Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  spfStatus       StatusType  @default(unknown)
+  dkimStatus      StatusType  @default(unknown)
+  dmarcStatus     StatusType  @default(unknown)
+  unsubStatus     StatusType  @default(unknown)
+
+  healthScore     Int         @default(0)
+
+  detectedEsp     String?
+
+  lastCheckedAt   DateTime?
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  deletedAt       DateTime?
+
+  snapshots           DnsSnapshot[]
+  changeEvents        DnsChangeEvent[]
+  emailAnalyses       EmailAnalysis[]
+  suppressionEvents   SuppressionEvent[]
+  unsubscribeTokens   UnsubscribeToken[]
+
   @@map("domains")
-  // A tenant cannot add the same domain twice
+
   @@unique([tenantId, domain])
   @@index([tenantId])
 }
 
-// ─────────────────────────────────────────────
-// DNS SNAPSHOTS — full record of every DNS check
-// We keep history so users can see what changed and when
-// ─────────────────────────────────────────────
+//
+// DNS SNAPSHOTS
+//
+
 model DnsSnapshot {
-  id       String @id @default(uuid())
-  domainId String
-  domain   Domain @relation(fields: [domainId], references: [id])
-  
-  // The raw SPF record text e.g. "v=spf1 include:sendgrid.net ~all"
-  spfRecord     String?
-  
-  // How many DNS lookups the SPF record requires (limit is 10)
-  spfLookupCount Int?
-  
-  // The result of the SPF check
-  spfResult     String? // "pass" | "fail" | "softfail" | "none" | "permerror"
-  
-  // DKIM check results stored as JSON
-  // e.g. [{ selector: "s1", valid: true, keyBits: 2048, aligned: true }]
-  dkimSelectors Json?
-  
-  // The raw DMARC record
-  dmarcRecord   String?
-  
-  // The DMARC policy setting
-  dmarcPolicy   String? // "none" | "quarantine" | "reject"
-  
-  // DMARC percentage tag (pct=)
-  dmarcPct      Int?
-  
-  // Calculated score for this snapshot
-  overallScore  Int @default(0)
-  
-  capturedAt DateTime @default(now())
+  id                String     @id @default(uuid())
+
+  domainId          String
+  domain            Domain     @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  spfRecord         String?
+  spfLookupCount    Int?
+  spfResult         String?
+
+  dkimSelectors     Json?
+
+  dmarcRecord       String?
+  dmarcPolicy       String?
+  dmarcPct          Int?
+
+  overallScore      Int        @default(0)
+
+  capturedAt        DateTime   @default(now())
 
   @@map("dns_snapshots")
-  // Fast lookup of history for a domain, newest first
+
   @@index([domainId, capturedAt(sort: Desc)])
 }
 
-// ─────────────────────────────────────────────
-// DNS CHANGE EVENTS — when something changes between snapshots
-// This is what triggers alerts
-// ─────────────────────────────────────────────
+//
+// DNS CHANGE EVENTS
+//
+
 model DnsChangeEvent {
-  id       String @id @default(uuid())
-  domainId String
-  domain   Domain @relation(fields: [domainId], references: [id])
-  tenantId String
-  
-  // What type of change happened
-  changeType String // "spf_lookup_exceeded" | "dkim_removed" | "dmarc_weakened" etc.
-  
-  // How bad is it
-  severity   String // "critical" | "warning" | "info"
-  
-  // What the value was before
-  previousValue String?
-  
-  // What the value is now
-  currentValue  String?
-  
-  // AI-generated explanation (filled in async by background job)
-  aiTitle    String?
-  aiSummary  String?
-  aiFixSteps Json?   // Array of fix steps
-  
-  // Has the user seen and acknowledged this alert
-  acknowledged Boolean @default(false)
-  resolvedAt   DateTime?
-  
-  detectedAt DateTime @default(now())
+  id               String        @id @default(uuid())
+
+  domainId         String
+  domain           Domain        @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  tenantId         String
+  tenant           Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  changeType       String
+
+  severity         SeverityType
+
+  previousValue    String?
+  currentValue     String?
+
+  aiTitle          String?
+  aiSummary        String?
+  aiFixSteps       Json?
+
+  acknowledged     Boolean       @default(false)
+  resolvedAt       DateTime?
+
+  detectedAt       DateTime      @default(now())
 
   @@map("dns_change_events")
+
   @@index([tenantId, detectedAt(sort: Desc)])
   @@index([domainId])
 }
 
-// ─────────────────────────────────────────────
-// EMAIL ANALYSES — results from test email analyzer
-// User sends an email to our inbox, we analyze the headers
-// ─────────────────────────────────────────────
+//
+// EMAIL ANALYSES
+//
+
 model EmailAnalysis {
-  id       String @id @default(uuid())
-  domainId String
-  domain   Domain @relation(fields: [domainId], references: [id])
-  tenantId String
-  
-  // The structured result from parsing headers (never raw headers)
-  // Stored as JSON: { spf: {...}, dkim: [...], dmarc: {...}, score: 87 }
-  parsedResult Json
-  
-  // AI-generated diagnosis text (streamed to user, stored here when complete)
-  aiDiagnosis  String?
-  
-  // Which ESP we fingerprinted from the headers
-  espDetected   String?
-  espConfidence Float?
-  
-  // Overall pass/fail score
-  overallScore  Int @default(0)
-  
-  receivedAt DateTime @default(now())
-  
-  // Raw headers are stored temporarily and deleted after 7 days (privacy)
+  id                  String      @id @default(uuid())
+
+  domainId            String
+  domain              Domain      @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  tenantId            String
+  tenant              Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  parsedResult        Json
+
+  aiDiagnosis         String?
+
+  espDetected         String?
+  espConfidence       Float?
+
+  overallScore        Int         @default(0)
+
+  receivedAt          DateTime    @default(now())
+
   rawHeadersDeletedAt DateTime?
 
   @@map("email_analyses")
+
   @@index([tenantId, receivedAt(sort: Desc)])
   @@index([domainId])
 }
 
-// ─────────────────────────────────────────────
-// SUPPRESSION EVENTS — unsubscribes and complaints
-// We hash emails, never store them in plain text
-// ─────────────────────────────────────────────
+//
+// SUPPRESSION EVENTS
+//
+
 model SuppressionEvent {
-  id       String @id @default(uuid())
-  tenantId String
-  domainId String
-  domain   Domain @relation(fields: [domainId], references: [id])
-  
-  // SHA-256 hash of the email address — we never store plain emails
-  emailHash  String
-  
-  // What happened
-  eventType  String // "unsubscribe" | "spam_complaint" | "bounce"
-  
-  // Which ESP sent us this event
-  sourceEsp  String?
-  
-  occurredAt DateTime
-  processedAt DateTime @default(now())
+  id            String                 @id @default(uuid())
+
+  tenantId      String
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  domainId      String
+  domain        Domain                 @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  emailHash     String
+
+  eventType     SuppressionEventType
+
+  sourceEsp     String?
+
+  occurredAt    DateTime
+  processedAt   DateTime               @default(now())
 
   @@map("suppression_events")
+
   @@index([tenantId, occurredAt(sort: Desc)])
   @@index([domainId])
 }
 
-// ─────────────────────────────────────────────
-// UNSUBSCRIBE TOKENS — signed tokens for RFC 8058
-// Each token links a domain to a specific recipient
-// ─────────────────────────────────────────────
+//
+// UNSUBSCRIBE TOKENS
+//
+
 model UnsubscribeToken {
-  id       String @id @default(uuid())
-  tenantId String
-  domainId String
-  
-  // HMAC-SHA256 of (domainId + recipientEmail) — stored hashed
-  tokenHash     String @unique
-  
-  // SHA-256 of the recipient email
-  recipientHash String
-  
-  // When this token was actually used (null = not used yet)
-  usedAt DateTime?
-  
-  createdAt DateTime @default(now())
+  id              String      @id @default(uuid())
+
+  tenantId        String
+  tenant          Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  domainId        String
+  domain          Domain      @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  tokenHash       String      @unique
+
+  recipientHash   String
+
+  usedAt          DateTime?
+
+  createdAt       DateTime    @default(now())
 
   @@map("unsubscribe_tokens")
+
   @@index([domainId])
 }
 
-// ─────────────────────────────────────────────
-// AI USAGE LOG — track every AI call for cost control
-// ─────────────────────────────────────────────
+//
+// AI USAGE LOGS
+//
+
 model AiUsageLog {
-  id       String @id @default(uuid())
-  tenantId String
-  
-  // Which feature triggered this AI call
-  feature  String // "alert_explainer" | "header_analyzer" | "snippet_generator" | "chat"
-  
-  model    String // "gemini-2.0-flash"
-  
-  // Token counts for cost calculation
-  inputTokens  Int?
-  outputTokens Int?
-  
-  // Calculated cost in USD
-  costUsd Float?
-  
-  createdAt DateTime @default(now())
+  id             String      @id @default(uuid())
+
+  tenantId       String
+  tenant         Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  feature        String
+
+  model          String
+
+  inputTokens    Int?
+  outputTokens   Int?
+
+  costUsd        Float?
+
+  createdAt      DateTime    @default(now())
 
   @@map("ai_usage_logs")
+
   @@index([tenantId, createdAt(sort: Desc)])
 }
 
-// ─────────────────────────────────────────────
-// AUDIT LOGS — immutable record of every important action
-// ─────────────────────────────────────────────
+//
+// AUDIT LOGS
+//
+
 model AuditLog {
-  id       String @id @default(uuid())
-  tenantId String
-  userId   String?
-  
-  // What action happened e.g. "domain.added", "scan.triggered"
-  action   String
-  
-  // What resource was affected
-  resourceType String? // "domain" | "user" | "billing"
-  resourceId   String?
-  
-  // Extra context stored as JSON
-  metadata  Json?
-  
-  // IP address of the user who triggered this
-  ipAddress String?
-  
-  createdAt DateTime @default(now())
+  id              String      @id @default(uuid())
+
+  tenantId        String
+  tenant          Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  userId          String?
+
+  action          String
+
+  resourceType    String?
+  resourceId      String?
+
+  metadata        Json?
+
+  ipAddress       String?
+
+  createdAt       DateTime    @default(now())
 
   @@map("audit_logs")
+
   @@index([tenantId, createdAt(sort: Desc)])
 }
