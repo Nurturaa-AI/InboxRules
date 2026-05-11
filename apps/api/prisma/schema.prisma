@@ -1,338 +1,234 @@
 generator client {
   provider = "prisma-client-js"
+  engineType ="client"
+  
 }
 
 datasource db {
   provider = "postgresql"
+  
 }
 
-//
-// ENUMS
-//
-
-enum TenantPlan {
-  free
-  pro
-  agency
-}
-
-enum UserRole {
-  owner
-  admin
-  member
-}
-
-enum StatusType {
-  unknown
-  pass
-  fail
-  warn
-}
-
-enum SeverityType {
-  critical
-  warning
-  info
-}
-
-enum SuppressionEventType {
-  unsubscribe
-  spam_complaint
-  bounce
-}
-
-//
-// TENANTS
-//
-
+// ─────────────────────────────────────────────
+// TENANTS — one per company/customer account
+// ─────────────────────────────────────────────
 model Tenant {
-  id             String      @id @default(uuid())
-  name           String
-  plan           TenantPlan  @default(free)
-  lsCustomerId   String?
+  id           String    @id @default(uuid())
+  name         String
+  plan         String    @default("free")
+  lsCustomerId String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
 
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-  deletedAt      DateTime?
-
-  users              User[]
-  domains            Domain[]
-  changeEvents       DnsChangeEvent[]
-  emailAnalyses      EmailAnalysis[]
-  suppressionEvents  SuppressionEvent[]
-  aiUsageLogs        AiUsageLog[]
-  auditLogs          AuditLog[]
-  unsubscribeTokens  UnsubscribeToken[]
+  // Relations — every relation must be listed here
+  users             User[]
+  domains           Domain[]
+  changeEvents      DnsChangeEvent[]
+  emailAnalyses     EmailAnalysis[]
+  suppressionEvents SuppressionEvent[]
+  unsubTokens       UnsubscribeToken[]
+  aiUsageLogs       AiUsageLog[]
+  auditLogs         AuditLog[]
 
   @@map("tenants")
 }
 
-//
+// ─────────────────────────────────────────────
 // USERS
-//
-
+// ─────────────────────────────────────────────
 model User {
-  id         String     @id @default(uuid())
-
-  clerkId    String     @unique
-  email      String
-
-  role       UserRole   @default(member)
-
-  tenantId   String
-  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
-  deletedAt  DateTime?
-
-  @@map("users")
+  id        String    @id @default(uuid())
+  clerkId   String    @unique
+  email     String
+  role      String    @default("member")
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@index([clerkId])
   @@index([tenantId])
-
-  @@unique([tenantId, email])
+  @@map("users")
 }
 
-//
+// ─────────────────────────────────────────────
 // DOMAINS
-//
-
+// ─────────────────────────────────────────────
 model Domain {
-  id              String      @id @default(uuid())
+  id            String    @id @default(uuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id])
+  domain        String
+  healthScore   Int       @default(0)
+  spfStatus     String    @default("unknown")
+  dkimStatus    String    @default("unknown")
+  dmarcStatus   String    @default("unknown")
+  unsubStatus   String    @default("unknown")
+  detectedEsp   String?
+  lastCheckedAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
 
-  domain          String
-
-  tenantId        String
-  tenant          Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  spfStatus       StatusType  @default(unknown)
-  dkimStatus      StatusType  @default(unknown)
-  dmarcStatus     StatusType  @default(unknown)
-  unsubStatus     StatusType  @default(unknown)
-
-  healthScore     Int         @default(0)
-
-  detectedEsp     String?
-
-  lastCheckedAt   DateTime?
-
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-  deletedAt       DateTime?
-
-  snapshots           DnsSnapshot[]
-  changeEvents        DnsChangeEvent[]
-  emailAnalyses       EmailAnalysis[]
-  suppressionEvents   SuppressionEvent[]
-  unsubscribeTokens   UnsubscribeToken[]
-
-  @@map("domains")
+  // Both sides of every relation must be defined
+  snapshots         DnsSnapshot[]
+  changeEvents      DnsChangeEvent[]
+  emailAnalyses     EmailAnalysis[]
+  suppressionEvents SuppressionEvent[]
+  // This was missing — caused the UnsubscribeToken error
+  unsubTokens       UnsubscribeToken[]
 
   @@unique([tenantId, domain])
   @@index([tenantId])
+  @@map("domains")
 }
 
-//
+// ─────────────────────────────────────────────
 // DNS SNAPSHOTS
-//
-
+// ─────────────────────────────────────────────
 model DnsSnapshot {
-  id                String     @id @default(uuid())
-
-  domainId          String
-  domain            Domain     @relation(fields: [domainId], references: [id], onDelete: Cascade)
-
-  spfRecord         String?
-  spfLookupCount    Int?
-  spfResult         String?
-
-  dkimSelectors     Json?
-
-  dmarcRecord       String?
-  dmarcPolicy       String?
-  dmarcPct          Int?
-
-  overallScore      Int        @default(0)
-
-  capturedAt        DateTime   @default(now())
-
-  @@map("dns_snapshots")
+  id             String   @id @default(uuid())
+  domainId       String
+  domain         Domain   @relation(fields: [domainId], references: [id])
+  spfRecord      String?
+  spfLookupCount Int?
+  spfResult      String?
+  dkimSelectors  Json?
+  dmarcRecord    String?
+  dmarcPolicy    String?
+  dmarcPct       Int?
+  overallScore   Int      @default(0)
+  capturedAt     DateTime @default(now())
 
   @@index([domainId, capturedAt(sort: Desc)])
+  @@map("dns_snapshots")
 }
 
-//
+// ─────────────────────────────────────────────
 // DNS CHANGE EVENTS
-//
-
+// ─────────────────────────────────────────────
 model DnsChangeEvent {
-  id               String        @id @default(uuid())
-
-  domainId         String
-  domain           Domain        @relation(fields: [domainId], references: [id], onDelete: Cascade)
-
-  tenantId         String
-  tenant           Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  changeType       String
-
-  severity         SeverityType
-
-  previousValue    String?
-  currentValue     String?
-
-  aiTitle          String?
-  aiSummary        String?
-  aiFixSteps       Json?
-
-  acknowledged     Boolean       @default(false)
-  resolvedAt       DateTime?
-
-  detectedAt       DateTime      @default(now())
-
-  @@map("dns_change_events")
+  id            String    @id @default(uuid())
+  domainId      String
+  // Relation to Domain (one side)
+  domain        Domain    @relation(fields: [domainId], references: [id])
+  tenantId      String
+  // Relation to Tenant (other side — this was missing before)
+  tenant        Tenant    @relation(fields: [tenantId], references: [id])
+  changeType    String
+  severity      String
+  previousValue String?
+  currentValue  String?
+  aiTitle       String?
+  aiSummary     String?
+  aiFixSteps    Json?
+  acknowledged  Boolean   @default(false)
+  resolvedAt    DateTime?
+  detectedAt    DateTime  @default(now())
 
   @@index([tenantId, detectedAt(sort: Desc)])
   @@index([domainId])
+  @@map("dns_change_events")
 }
 
-//
+// ─────────────────────────────────────────────
 // EMAIL ANALYSES
-//
-
+// ─────────────────────────────────────────────
 model EmailAnalysis {
-  id                  String      @id @default(uuid())
-
-  domainId            String
-  domain              Domain      @relation(fields: [domainId], references: [id], onDelete: Cascade)
-
-  tenantId            String
-  tenant              Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  parsedResult        Json
-
-  aiDiagnosis         String?
-
-  espDetected         String?
-  espConfidence       Float?
-
-  overallScore        Int         @default(0)
-
-  receivedAt          DateTime    @default(now())
-
-  rawHeadersDeletedAt DateTime?
-
-  @@map("email_analyses")
+  id                    String    @id @default(uuid())
+  domainId              String
+  domain                Domain    @relation(fields: [domainId], references: [id])
+  tenantId              String
+  // Relation to Tenant — required since Tenant lists emailAnalyses
+  tenant                Tenant    @relation(fields: [tenantId], references: [id])
+  parsedResult          Json
+  aiDiagnosis           String?
+  espDetected           String?
+  espConfidence         Float?
+  overallScore          Int       @default(0)
+  receivedAt            DateTime  @default(now())
+  rawHeadersDeletedAt   DateTime?
 
   @@index([tenantId, receivedAt(sort: Desc)])
   @@index([domainId])
+  @@map("email_analyses")
 }
 
-//
+// ─────────────────────────────────────────────
 // SUPPRESSION EVENTS
-//
-
+// ─────────────────────────────────────────────
 model SuppressionEvent {
-  id            String                 @id @default(uuid())
-
-  tenantId      String
-  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  domainId      String
-  domain        Domain                 @relation(fields: [domainId], references: [id], onDelete: Cascade)
-
-  emailHash     String
-
-  eventType     SuppressionEventType
-
-  sourceEsp     String?
-
-  occurredAt    DateTime
-  processedAt   DateTime               @default(now())
-
-  @@map("suppression_events")
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  domainId    String
+  domain      Domain   @relation(fields: [domainId], references: [id])
+  emailHash   String
+  eventType   String
+  sourceEsp   String?
+  occurredAt  DateTime
+  processedAt DateTime @default(now())
 
   @@index([tenantId, occurredAt(sort: Desc)])
   @@index([domainId])
+  @@map("suppression_events")
 }
 
-//
+// ─────────────────────────────────────────────
 // UNSUBSCRIBE TOKENS
-//
-
+// ─────────────────────────────────────────────
 model UnsubscribeToken {
-  id              String      @id @default(uuid())
-
-  tenantId        String
-  tenant          Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  domainId        String
-  domain          Domain      @relation(fields: [domainId], references: [id], onDelete: Cascade)
-
-  tokenHash       String      @unique
-
-  recipientHash   String
-
-  usedAt          DateTime?
-
-  createdAt       DateTime    @default(now())
-
-  @@map("unsubscribe_tokens")
+  id            String    @id @default(uuid())
+  tenantId      String
+  // Relation to Tenant
+  tenant        Tenant    @relation(fields: [tenantId], references: [id])
+  domainId      String
+  // Relation to Domain — opposite side now exists in Domain model
+  domain        Domain    @relation(fields: [domainId], references: [id])
+  tokenHash     String    @unique
+  recipientHash String
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
 
   @@index([domainId])
+  @@map("unsubscribe_tokens")
 }
 
-//
-// AI USAGE LOGS
-//
-
+// ─────────────────────────────────────────────
+// AI USAGE LOG
+// ─────────────────────────────────────────────
 model AiUsageLog {
-  id             String      @id @default(uuid())
-
-  tenantId       String
-  tenant         Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  feature        String
-
-  model          String
-
-  inputTokens    Int?
-  outputTokens   Int?
-
-  costUsd        Float?
-
-  createdAt      DateTime    @default(now())
-
-  @@map("ai_usage_logs")
+  id           String   @id @default(uuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  feature      String
+  model        String
+  inputTokens  Int?
+  outputTokens Int?
+  costUsd      Float?
+  createdAt    DateTime @default(now())
 
   @@index([tenantId, createdAt(sort: Desc)])
+  @@map("ai_usage_logs")
 }
 
-//
+// ─────────────────────────────────────────────
 // AUDIT LOGS
-//
-
+// ─────────────────────────────────────────────
 model AuditLog {
-  id              String      @id @default(uuid())
-
-  tenantId        String
-  tenant          Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  userId          String?
-
-  action          String
-
-  resourceType    String?
-  resourceId      String?
-
-  metadata        Json?
-
-  ipAddress       String?
-
-  createdAt       DateTime    @default(now())
-
-  @@map("audit_logs")
+  id           String   @id @default(uuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  userId       String?
+  action       String
+  resourceType String?
+  resourceId   String?
+  metadata     Json?
+  ipAddress    String?
+  createdAt    DateTime @default(now())
 
   @@index([tenantId, createdAt(sort: Desc)])
+  @@map("audit_logs")
 }

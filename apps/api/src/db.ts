@@ -1,31 +1,43 @@
 // src/db.ts
-// This file creates ONE Prisma client that the whole app shares.
-// We use a singleton pattern because creating a new DB connection
-// on every request would exhaust the connection pool quickly.
+
+// Shared Prisma client for the whole application.
+// Prisma 7 with engineType="client" requires a database adapter.
 
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import "dotenv/config";
 
-// 'declare global' lets us attach our client to Node's global object.
-// This prevents creating multiple clients during hot-reloads in development.
+// Read DATABASE_URL from .env
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+  throw new Error("DATABASE_URL is not defined");
+}
+
+// Create PostgreSQL adapter
+const adapter = new PrismaPg({
+  connectionString,
+});
+
+// Extend globalThis so TypeScript knows about our cached client
 declare global {
   // eslint-disable-next-line no-var
   var __prisma: PrismaClient | undefined;
 }
 
-// If a client already exists (from a previous hot-reload), reuse it.
-// Otherwise create a new one.
+// Reuse Prisma client during hot reloads in development
 const db =
   globalThis.__prisma ??
   new PrismaClient({
+    adapter,
+
     log:
       process.env.NODE_ENV === "development"
-        ? // In development, log all queries to help with debugging
-          ["query", "error", "warn"]
-        : // In production, only log errors to avoid noise
-          ["error"],
+        ? ["query", "error", "warn"]
+        : ["error"],
   });
 
-// Save the client to global in development so hot-reloads reuse it
+// Cache client globally in development
 if (process.env.NODE_ENV === "development") {
   globalThis.__prisma = db;
 }
