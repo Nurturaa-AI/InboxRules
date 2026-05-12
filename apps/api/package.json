@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "workers": "tsx watch src/workers/index.ts",
     "start": "node dist/server.js",
     "db:migrate": "dotenv -e .env -- prisma migrate dev",
     "db:generate": "dotenv -e .env -- prisma generate",
