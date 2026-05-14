@@ -16,6 +16,7 @@ import { createDnsPollWorker } from "./workers/dns-poll.worker";
 import { createAlertDispatchWorker } from "./workers/alert-dispatch.worker";
 import { runScheduler } from "./workers/scheduler";
 import { aiRoutes } from "./modules/ai/ai.routes";
+import { suppressionRoutes } from "./modules/suppression/suppression.routes";
 
 // Create the Fastify app instance
 const app = Fastify({
@@ -142,6 +143,9 @@ async function buildApp() {
     }
   });
 
+  // (it uses its own internal key auth, not Clerk)
+  app.register(suppressionRoutes, { prefix: "" });
+
   // ─────────────────────────────────────────────
   // AUTHENTICATED ROUTES
   // All routes under /api/v1 require a valid Clerk token
@@ -156,6 +160,9 @@ async function buildApp() {
 
       // AI routes
       protectedApp.register(aiRoutes, { prefix: "/ai" });
+
+      // Suppression list routes
+      protectedApp.register(suppressionRoutes, { prefix: "/suppression" });
     },
     { prefix: "/api/v1" },
   );

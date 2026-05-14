@@ -1,0 +1,19 @@
+# wrangler.toml
+# Cloudflare Workers configuration file
+# This tells Cloudflare how to deploy our unsubscribe endpoint
+
+name = "inboxrules-unsub"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+# We do not need Node.js compatibility for this worker
+# It is pure Cloudflare Workers runtime
+
+[vars]
+# Non-secret environment variables
+ENVIRONMENT = "production"
+
+# Secret variables are set via:
+# wrangler secret put UNSUB_HMAC_SECRET
+# wrangler secret put DATABASE_URL
+# Never put secrets in this file
