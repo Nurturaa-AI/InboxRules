@@ -243,6 +243,57 @@ export function createAlertDispatchWorker() {
         where: { id: changeEventId },
       });
 
+      if (!changeEvent) {
+        console.log(
+          `[Alert Worker] Change event ${changeEventId} not found — skipping`,
+        );
+        return { skipped: true };
+      }
+
+      // If the change event does not have an AI explanation yet, generate one now
+      if (!changeEvent.aiTitle || !changeEvent.aiSummary) {
+        try {
+          // Get the domain to find its detected ESP
+          const domain = await db.domain.findFirst({
+            where: { id: job.data.domainId },
+            select: { detectedEsp: true },
+          });
+
+          const { explainDnsChange } =
+            await import("../modules/ai/alert-explainer");
+
+          const explanation = await explainDnsChange(
+            {
+              changeType: changeEvent.changeType,
+              severity: changeEvent.severity,
+              domain: job.data.domainName,
+              previousValue: changeEvent.previousValue,
+              currentValue: changeEvent.currentValue,
+              detectedEsp: domain?.detectedEsp || null,
+            },
+            tenantId,
+          );
+
+          // Save the AI explanation back to the change event
+          await db.dnsChangeEvent.update({
+            where: { id: changeEventId },
+            data: {
+              aiTitle: explanation.title,
+              aiSummary: explanation.summary,
+              aiFixSteps: explanation.fixSteps,
+            },
+          });
+
+          // Update the local changeEvent object so the email uses the AI content
+          changeEvent.aiTitle = explanation.title;
+          changeEvent.aiSummary = explanation.summary;
+          changeEvent.aiFixSteps = explanation.fixSteps as any;
+        } catch (err: any) {
+          // If AI fails, the email still goes out without AI content
+          console.error("[Alert Worker] AI explanation failed:", err.message);
+        }
+      }
+
       // If change event was deleted, skip this alert
       if (!changeEvent) {
         console.log(
