@@ -16,6 +16,11 @@ import { createDnsPollWorker } from "./workers/dns-poll.worker";
 import { createAlertDispatchWorker } from "./workers/alert-dispatch.worker";
 import { runScheduler } from "./workers/scheduler";
 import { aiRoutes } from "./modules/ai/ai.routes";
+import { alertRoutes } from "./modules/alerts/alerts.routes";
+import {
+  billingRoutes,
+  billingWebhookRoutes,
+} from "./modules/billing/billing.routes";
 import { suppressionRoutes } from "./modules/suppression/suppression.routes";
 
 // Create the Fastify app instance
@@ -163,9 +168,19 @@ async function buildApp() {
 
       // Suppression list routes
       protectedApp.register(suppressionRoutes, { prefix: "/suppression" });
+
+      // Alert management routes
+      protectedApp.register(alertRoutes, { prefix: "/alerts" });
+
+      // Billing routes
+      protectedApp.register(billingRoutes, { prefix: "/billing" });
     },
     { prefix: "/api/v1" },
   );
+
+  // ── Outside protected routes (public webhook) ──
+  app.register(billingWebhookRoutes);
+  // app.register(suppressionRoutes); // for /internal/unsubscribe
 
   // ─────────────────────────────────────────────
   // GLOBAL ERROR HANDLER

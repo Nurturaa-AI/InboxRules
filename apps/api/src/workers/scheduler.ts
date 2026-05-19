@@ -10,6 +10,7 @@
 
 import db from "../db";
 import { dnsPollQueue } from "../queue";
+import { sendWeeklyReport } from "../modules/alerts/alerts.service";
 
 // How often each plan's domains are checked (in milliseconds)
 const POLL_INTERVALS: Record<string, number> = {
@@ -57,6 +58,33 @@ async function scheduleDueScans() {
     // Calculate the cutoff time
     // Any domain not checked since before this time is due for a scan
     const cutoff = new Date(Date.now() - interval);
+
+    // Weekly report — runs every Monday at 9am
+    // In production use a proper cron schedule
+    // For now check every scheduler run if it is Monday 9am
+    const now = new Date();
+    const isMonday = now.getDay() === 1;
+    const isReportTime = now.getHours() === 9 && now.getMinutes() < 5;
+
+    if (isMonday && isReportTime) {
+      console.log("[Scheduler] Sending weekly reports...");
+
+      const tenants = await db.tenant.findMany({
+        where: { deletedAt: null },
+        select: { id: true },
+      });
+
+      for (const tenant of tenants) {
+        try {
+          await sendWeeklyReport(tenant.id);
+        } catch (err: any) {
+          console.error(
+            `[Scheduler] Weekly report failed for ${tenant.id}:`,
+            err.message,
+          );
+        }
+      }
+    }
 
     // Find domains that are due for scanning
     // Either they have never been scanned (lastCheckedAt is null)
