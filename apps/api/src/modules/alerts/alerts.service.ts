@@ -352,9 +352,9 @@ export async function sendWeeklyReport(tenantId: string): Promise<void> {
           .map(
             (change: {
               severity: string;
-              aiTitle: string;
+              aiTitle: string | null;
               changeType: string;
-              aiSummary: string;
+              aiSummary: string | null;
             }) => `
         <div style="padding:12px;border-left:3px solid ${change.severity === "critical" ? "#DC2626" : "#D97706"};background:#f9fafb;margin-bottom:8px;border-radius:4px">
           <p style="margin:0;font-weight:600;color:#111827">${change.aiTitle || change.changeType}</p>

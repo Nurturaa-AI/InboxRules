@@ -16,14 +16,12 @@ import type { AddDomainInput, ListDomainsInput } from "./domains.schema";
 
 export async function addDomain(tenantId: string, input: AddDomainInput) {
   // Look up any existing row for this (tenant, domain) — INCLUDING soft-deleted
-  // ones. The DB enforces @@unique([tenantId, domain]) and does NOT scope that
-  // to deletedAt, so a previously-removed domain still occupies the unique slot.
-  // If we only checked deletedAt: null here we would fall through to create()
-  // and hit a P2002 unique violation that surfaces as a generic 500.
-  const existing = await db.domain.findUnique({
-    where: {
-      tenantId_domain: { tenantId, domain: input.domain },
-    },
+  // ones. Uniqueness is enforced by a PARTIAL unique index scoped to
+  // `deletedAt IS NULL`, so soft-deleted rows do NOT reserve the slot. We still
+  // look them up here so we can reactivate one instead of creating a duplicate.
+  const existing = await db.domain.findFirst({
+    where: { tenantId, domain: input.domain },
+    orderBy: { createdAt: "desc" },
   });
 
   // An active (non-deleted) row means it is genuinely already in the account.

@@ -80,7 +80,13 @@ model Domain {
   // This was missing — caused the UnsubscribeToken error
   unsubTokens       UnsubscribeToken[]
 
-  @@unique([tenantId, domain])
+  // NOTE: uniqueness of (tenantId, domain) is enforced by a PARTIAL unique
+  // index scoped to `deletedAt IS NULL` — see migration
+  // 20260803000000_domain_partial_unique. Prisma cannot express partial
+  // indexes, so it is NOT declared here as @@unique. Do not add @@unique back
+  // or `prisma migrate` will try to recreate the full unique index and
+  // soft-deleted rows will once again block re-adding a domain.
+  @@index([tenantId, domain])
   @@index([tenantId])
   @@map("domains")
 }
