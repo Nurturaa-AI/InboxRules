@@ -15,19 +15,19 @@ import type { AddDomainInput, ListDomainsInput } from "./domains.schema";
 // ─────────────────────────────────────────────
 
 export async function addDomain(tenantId: string, input: AddDomainInput) {
-  // Check if this tenant already has this domain
-  // We do not want duplicate domains per tenant
-  const existing = await db.domain.findFirst({
+  // Look up any existing row for this (tenant, domain) — INCLUDING soft-deleted
+  // ones. The DB enforces @@unique([tenantId, domain]) and does NOT scope that
+  // to deletedAt, so a previously-removed domain still occupies the unique slot.
+  // If we only checked deletedAt: null here we would fall through to create()
+  // and hit a P2002 unique violation that surfaces as a generic 500.
+  const existing = await db.domain.findUnique({
     where: {
-      tenantId,
-      domain: input.domain,
-      // Only check non-deleted domains
-      deletedAt: null,
+      tenantId_domain: { tenantId, domain: input.domain },
     },
   });
 
-  // If domain already exists, return a clear error
-  if (existing) {
+  // An active (non-deleted) row means it is genuinely already in the account.
+  if (existing && existing.deletedAt === null) {
     throw new Error(`Domain ${input.domain} is already in your account`);
   }
 
@@ -64,38 +64,55 @@ export async function addDomain(tenantId: string, input: AddDomainInput) {
     );
   }
 
-  // Create the domain record in the database
-  // Health score starts at 0 — will be updated after first scan
-  const domain = await db.domain.create({
-    data: {
-      tenantId,
-      domain: input.domain,
-      healthScore: 0,
-      spfStatus: "unknown",
-      dkimStatus: "unknown",
-      dmarcStatus: "unknown",
-      unsubStatus: "unknown",
-    },
-  });
+  // Create the domain, or reactivate a previously soft-deleted one.
+  // Reactivating (rather than deleting + recreating) keeps the same id and any
+  // historical snapshots/events attached to it. Fields are reset to a clean
+  // baseline so stale statuses from before the deletion do not linger.
+  const baseline = {
+    healthScore: 0,
+    spfStatus: "unknown",
+    dkimStatus: "unknown",
+    dmarcStatus: "unknown",
+    unsubStatus: "unknown",
+    detectedEsp: null,
+    lastCheckedAt: null,
+  };
 
-  // Queue an immediate DNS scan so the user sees results quickly
-  // We do not await this — it runs in the background
-  // The user gets the domain back immediately without waiting for the scan
-  await dnsPollQueue.add(
-    "scan-domain",
-    {
-      domainId: domain.id,
-      tenantId,
-      // Mark as triggered by user so we can prioritize it
-      triggeredBy: "user_add",
-    },
-    {
-      // Run this job immediately (no delay)
-      delay: 0,
-      // Give it a unique job ID so duplicate jobs are rejected
-      jobId: `scan-${domain.id}-${Date.now()}`,
-    },
-  );
+  const domain = existing
+    ? await db.domain.update({
+        where: { id: existing.id },
+        data: { ...baseline, deletedAt: null },
+      })
+    : await db.domain.create({
+        data: { tenantId, domain: input.domain, ...baseline },
+      });
+
+  // Queue an immediate DNS scan so the user sees results quickly.
+  // This is best-effort: the domain is already persisted, and the scheduler
+  // will pick it up within a few minutes regardless. A transient Redis outage
+  // must NOT turn a successful add into a 500 — so we log and move on.
+  try {
+    await dnsPollQueue.add(
+      "scan-domain",
+      {
+        domainId: domain.id,
+        tenantId,
+        // Mark as triggered by user so we can prioritize it
+        triggeredBy: "user_add",
+      },
+      {
+        // Run this job immediately (no delay)
+        delay: 0,
+        // Give it a unique job ID so duplicate jobs are rejected
+        jobId: `scan-${domain.id}-${Date.now()}`,
+      },
+    );
+  } catch (err) {
+    console.error(
+      `[addDomain] Failed to queue initial scan for ${domain.domain} (${domain.id}); scheduler will retry:`,
+      err instanceof Error ? err.message : err,
+    );
+  }
 
   // Write an audit log entry
   await db.auditLog.create({

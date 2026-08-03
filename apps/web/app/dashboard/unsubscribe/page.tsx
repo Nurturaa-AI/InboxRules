@@ -1,109 +1,86 @@
 "use client";
 
 import { useState } from "react";
+import { useAuth } from "@clerk/nextjs";
 import {
   Copy,
   Check,
-  ExternalLink,
   Download,
-  Plus,
   Shield,
   Zap,
   Globe,
+  RefreshCw,
 } from "lucide-react";
+import { useApiQuery } from "@/lib/useApiQuery";
 
-const UNSUB_EVENTS = [
-  {
-    id: "1",
-    emailHash: "a3f9b2...c8d1",
-    domain: "acme.com",
-    method: "one_click",
-    source: "Gmail",
-    time: "2 min ago",
-  },
-  {
-    id: "2",
-    emailHash: "b7e2d4...f3a9",
-    domain: "acme.com",
-    method: "one_click",
-    source: "Yahoo",
-    time: "15 min ago",
-  },
-  {
-    id: "3",
-    emailHash: "c9d5e1...a2b8",
-    domain: "techcorp.io",
-    method: "manual",
-    source: "Outlook",
-    time: "1 hr ago",
-  },
-  {
-    id: "4",
-    emailHash: "d1f8c3...e7b2",
-    domain: "acme.com",
-    method: "one_click",
-    source: "Gmail",
-    time: "2 hr ago",
-  },
-  {
-    id: "5",
-    emailHash: "e4a7b9...d5c1",
-    domain: "agency.xyz",
-    method: "manual",
-    source: "Apple Mail",
-    time: "5 hr ago",
-  },
-];
+type UnsubStatus = "active" | "inactive" | "disabled" | "unknown";
+interface Domain {
+  id: string;
+  domain: string;
+  unsubStatus: UnsubStatus;
+}
 
-const DOMAINS_WITH_UNSUB = [
-  {
-    domain: "acme.com",
-    token: "ak_abc123xyz",
-    active: true,
-    unsubs7d: 47,
-    endpoint: "https://unsub.inboxrules.io/ak_abc123xyz",
-  },
-  {
-    domain: "techcorp.io",
-    token: "tk_def456uvw",
-    active: true,
-    unsubs7d: 12,
-    endpoint: "https://unsub.inboxrules.io/tk_def456uvw",
-  },
-  {
-    domain: "newsletter.dev",
-    token: "nd_ghi789rst",
-    active: true,
-    unsubs7d: 83,
-    endpoint: "https://unsub.inboxrules.io/nd_ghi789rst",
-  },
-  {
-    domain: "agency.xyz",
-    token: "ax_jkl012opq",
-    active: true,
-    unsubs7d: 9,
-    endpoint: "https://unsub.inboxrules.io/ax_jkl012opq",
-  },
-  {
-    domain: "startup.co",
-    token: null,
-    active: false,
-    unsubs7d: 0,
-    endpoint: null,
-  },
-];
+interface SuppressionEvent {
+  id: string;
+  eventType: string;
+  sourceEsp: string | null;
+  occurredAt: string;
+  domain: { domain: string };
+}
+
+function timeAgo(d: string) {
+  const mins = Math.floor((Date.now() - new Date(d).getTime()) / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+const UNSUB_URL =
+  process.env.NEXT_PUBLIC_UNSUB_URL || "https://unsub.inboxrules.io";
 
 export default function UnsubscribePage() {
+  useAuth();
+
+  const { data: domainsData, loading: domainsLoading } =
+    useApiQuery<Domain[]>("/domains?limit=100");
+
+  const {
+    data: suppressionData,
+    loading: suppressionLoading,
+    refetch,
+  } = useApiQuery<{ items: SuppressionEvent[]; pagination: { total: number } }>(
+    "/suppression?limit=20",
+  );
+
   const [copied, setCopied] = useState<string | null>(null);
 
-  function copyToClipboard(text: string, key: string) {
-    navigator.clipboard.writeText(text);
-    setCopied(key);
+  const domains = domainsData || [];
+  const events =
+    suppressionData?.items ||
+    (Array.isArray(suppressionData)
+      ? (suppressionData as SuppressionEvent[])
+      : []);
+  const totalUnsubs = suppressionData?.pagination?.total || 0;
+  const active = domains.filter((d) => d.unsubStatus === "active").length;
+
+  function copyEndpoint(domainId: string) {
+    const url = `${UNSUB_URL}/unsubscribe/${domainId}`;
+    navigator.clipboard.writeText(url);
+    setCopied(domainId);
     setTimeout(() => setCopied(null), 2000);
   }
 
-  const totalUnsubs = DOMAINS_WITH_UNSUB.reduce((a, d) => a + d.unsubs7d, 0);
-  const activeEndpoints = DOMAINS_WITH_UNSUB.filter((d) => d.active).length;
+  function copyHeaders(domain: Domain) {
+    const text =
+      `List-Unsubscribe: <${UNSUB_URL}/unsubscribe/${domain.id}>, ` +
+      `<mailto:unsubscribe@${domain.domain}?subject=unsubscribe>\n` +
+      `List-Unsubscribe-Post: List-Unsubscribe=One-Click`;
+    navigator.clipboard.writeText(text);
+    setCopied(`headers-${domain.id}`);
+    setTimeout(() => setCopied(null), 2000);
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -121,7 +98,6 @@ export default function UnsubscribePage() {
         </h1>
         <p style={{ fontSize: 13, color: "var(--text-3)", marginTop: 4 }}>
           RFC 8058 one-click unsubscribe endpoints and suppression list
-          management
         </p>
       </div>
 
@@ -206,7 +182,7 @@ export default function UnsubscribePage() {
         ))}
       </div>
 
-      {/* Stats row */}
+      {/* Stats */}
       <div
         style={{
           display: "grid",
@@ -217,11 +193,19 @@ export default function UnsubscribePage() {
         {[
           {
             label: "Active Endpoints",
-            value: activeEndpoints,
+            value: domainsLoading ? "—" : String(active),
             color: "#10B981",
           },
-          { label: "Unsubscribes (7d)", value: totalUnsubs, color: "#2563EB" },
-          { label: "Suppressed Emails", value: "1,247", color: "#8B5CF6" },
+          {
+            label: "Unsubscribes (all)",
+            value: suppressionLoading ? "—" : String(totalUnsubs),
+            color: "#2563EB",
+          },
+          {
+            label: "Total Domains",
+            value: domainsLoading ? "—" : String(domains.length),
+            color: "#8B5CF6",
+          },
         ].map((item) => (
           <div
             key={item.label}
@@ -266,77 +250,82 @@ export default function UnsubscribePage() {
         }}
       >
         <div
-          className="flex items-center justify-between"
           style={{
             padding: "16px 22px",
             borderBottom: "1px solid var(--border)",
           }}
         >
-          <div>
-            <h2 style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
-              Unsubscribe Endpoints
-            </h2>
-            <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2 }}>
-              Copy the endpoint URL and add it to your List-Unsubscribe headers
-            </p>
-          </div>
+          <h2 style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
+            Unsubscribe Endpoints
+          </h2>
+          <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2 }}>
+            Add these URLs and headers to your email campaigns
+          </p>
         </div>
 
-        {DOMAINS_WITH_UNSUB.map((d) => (
-          <div
-            key={d.domain}
-            style={{
-              padding: "16px 22px",
-              borderBottom: "1px solid var(--border)",
-              transition: "background 0.12s",
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLDivElement).style.background =
-                "var(--surface-2)";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLDivElement).style.background =
-                "transparent";
-            }}
-          >
-            <div className="flex items-center gap-4">
-              {/* Domain */}
-              <div style={{ width: 160, flexShrink: 0 }}>
-                <p
+        {domainsLoading ? (
+          <div style={{ padding: 40, textAlign: "center" }}>
+            <RefreshCw
+              size={20}
+              color="var(--text-3)"
+              className="spin"
+              style={{ margin: "0 auto" }}
+            />
+          </div>
+        ) : domains.length === 0 ? (
+          <div style={{ padding: 40, textAlign: "center" }}>
+            <p style={{ fontSize: 14, color: "var(--text-3)" }}>
+              No domains yet. Add a domain to generate unsubscribe endpoints.
+            </p>
+          </div>
+        ) : (
+          domains.map((d) => (
+            <div
+              key={d.id}
+              style={{
+                padding: "16px 22px",
+                borderBottom: "1px solid var(--border)",
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLDivElement).style.background =
+                  "var(--surface-2)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLDivElement).style.background =
+                  "transparent";
+              }}
+            >
+              <div className="flex items-center gap-4">
+                <div style={{ width: 160, flexShrink: 0 }}>
+                  <p
+                    style={{
+                      fontSize: 13.5,
+                      fontWeight: 600,
+                      color: "var(--text)",
+                    }}
+                  >
+                    {d.domain}
+                  </p>
+                </div>
+
+                <span
                   style={{
-                    fontSize: 13.5,
+                    fontSize: 11.5,
                     fontWeight: 600,
-                    color: "var(--text)",
+                    padding: "3px 9px",
+                    borderRadius: 999,
+                    flexShrink: 0,
+                    background:
+                      d.unsubStatus === "active"
+                        ? "rgba(16,185,129,0.1)"
+                        : "rgba(239,68,68,0.1)",
+                    color: d.unsubStatus === "active" ? "#10B981" : "#EF4444",
                   }}
                 >
-                  {d.domain}
-                </p>
-                <p
-                  style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2 }}
-                >
-                  {d.unsubs7d} unsubs this week
-                </p>
-              </div>
+                  {d.unsubStatus === "active" ? "● Active" : "○ Inactive"}
+                </span>
 
-              {/* Status */}
-              <span
-                style={{
-                  fontSize: 11.5,
-                  fontWeight: 600,
-                  padding: "3px 9px",
-                  borderRadius: 999,
-                  background: d.active
-                    ? "rgba(16,185,129,0.1)"
-                    : "rgba(239,68,68,0.1)",
-                  color: d.active ? "#10B981" : "#EF4444",
-                  flexShrink: 0,
-                }}
-              >
-                {d.active ? "● Active" : "○ Inactive"}
-              </span>
-
-              {/* Endpoint URL */}
-              {d.endpoint ? (
                 <div className="flex items-center gap-2 flex-1">
                   <code
                     style={{
@@ -353,67 +342,60 @@ export default function UnsubscribePage() {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {d.endpoint}
+                    {UNSUB_URL}/unsubscribe/{d.id}
                   </code>
                   <button
-                    onClick={() => copyToClipboard(d.endpoint!, d.domain)}
+                    onClick={() => copyEndpoint(d.id)}
                     style={{
                       width: 32,
                       height: 32,
                       borderRadius: 8,
                       border: "1px solid var(--border)",
                       background: "var(--surface)",
-                      color: copied === d.domain ? "#10B981" : "var(--text-2)",
+                      color: copied === d.id ? "#10B981" : "var(--text-2)",
                       cursor: "pointer",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                     }}
+                    title="Copy endpoint URL"
                   >
-                    {copied === d.domain ? (
-                      <Check size={13} />
-                    ) : (
-                      <Copy size={13} />
-                    )}
+                    {copied === d.id ? <Check size={13} /> : <Copy size={13} />}
                   </button>
                   <button
+                    onClick={() => copyHeaders(d)}
                     style={{
-                      width: 32,
                       height: 32,
+                      padding: "0 12px",
                       borderRadius: 8,
                       border: "1px solid var(--border)",
                       background: "var(--surface)",
-                      color: "var(--text-2)",
+                      color:
+                        copied === `headers-${d.id}`
+                          ? "#10B981"
+                          : "var(--text-2)",
                       cursor: "pointer",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      fontFamily: "var(--font-sans)",
                       display: "flex",
                       alignItems: "center",
-                      justifyContent: "center",
+                      gap: 5,
                     }}
+                    title="Copy full email headers"
                   >
-                    <ExternalLink size={13} />
+                    {copied === `headers-${d.id}` ? (
+                      <Check size={11} />
+                    ) : (
+                      <Copy size={11} />
+                    )}
+                    Headers
                   </button>
                 </div>
-              ) : (
-                <button
-                  className="flex items-center gap-1.5"
-                  style={{
-                    padding: "6px 14px",
-                    borderRadius: 8,
-                    background: "linear-gradient(135deg, #2563EB, #7C3AED)",
-                    color: "white",
-                    border: "none",
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    fontFamily: "var(--font-sans)",
-                  }}
-                >
-                  <Plus size={12} /> Enable Endpoint
-                </button>
-              )}
+              </div>
             </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
 
       {/* Recent unsubscribe events */}
@@ -437,42 +419,76 @@ export default function UnsubscribePage() {
               Recent Unsubscribe Events
             </h2>
             <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2 }}>
-              Email addresses are SHA-256 hashed — never stored in plain text
+              Email addresses stored as SHA-256 hashes only
             </p>
           </div>
-          <button
-            className="flex items-center gap-1.5"
-            style={{
-              height: 32,
-              padding: "0 12px",
-              background: "var(--surface-2)",
-              border: "1px solid var(--border)",
-              borderRadius: 8,
-              fontSize: 12.5,
-              fontWeight: 600,
-              cursor: "pointer",
-              color: "var(--text-2)",
-              fontFamily: "var(--font-sans)",
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            <Download size={13} />
-            Export CSV
-          </button>
-        </div>
-
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr
+          <div className="flex items-center gap-2">
+            <button
+              onClick={refetch}
               style={{
-                borderBottom: "1px solid var(--border)",
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                border: "1px solid var(--border)",
                 background: "var(--surface-2)",
+                cursor: "pointer",
+                color: "var(--text-3)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
               }}
             >
-              {["Email (hashed)", "Domain", "Method", "Source", "Time"].map(
-                (h) => (
+              <RefreshCw
+                size={13}
+                className={suppressionLoading ? "spin" : ""}
+              />
+            </button>
+            <button
+              className="flex items-center gap-1.5"
+              style={{
+                height: 32,
+                padding: "0 12px",
+                background: "var(--surface-2)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: "pointer",
+                color: "var(--text-2)",
+                fontFamily: "var(--font-sans)",
+              }}
+            >
+              <Download size={13} /> Export CSV
+            </button>
+          </div>
+        </div>
+
+        {suppressionLoading ? (
+          <div style={{ padding: 40, textAlign: "center" }}>
+            <RefreshCw
+              size={20}
+              color="var(--text-3)"
+              className="spin"
+              style={{ margin: "0 auto" }}
+            />
+          </div>
+        ) : events.length === 0 ? (
+          <div style={{ padding: 40, textAlign: "center" }}>
+            <p style={{ fontSize: 14, color: "var(--text-3)" }}>
+              No unsubscribe events yet. Events appear here when recipients
+              click unsubscribe.
+            </p>
+          </div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr
+                style={{
+                  borderBottom: "1px solid var(--border)",
+                  background: "var(--surface-2)",
+                }}
+              >
+                {["Domain", "Method", "Source", "Time"].map((h) => (
                   <th
                     key={h}
                     style={{
@@ -487,87 +503,78 @@ export default function UnsubscribePage() {
                   >
                     {h}
                   </th>
-                ),
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {UNSUB_EVENTS.map((e) => (
-              <tr
-                key={e.id}
-                style={{
-                  borderBottom: "1px solid var(--border)",
-                  transition: "background 0.12s",
-                }}
-                onMouseEnter={(ev) => {
-                  (ev.currentTarget as HTMLTableRowElement).style.background =
-                    "var(--surface-2)";
-                }}
-                onMouseLeave={(ev) => {
-                  (ev.currentTarget as HTMLTableRowElement).style.background =
-                    "transparent";
-                }}
-              >
-                <td style={{ padding: "13px 22px" }}>
-                  <code
-                    style={{
-                      fontSize: 12,
-                      fontFamily: "var(--font-mono)",
-                      color: "var(--text-2)",
-                    }}
-                  >
-                    {e.emailHash}
-                  </code>
-                </td>
-                <td style={{ padding: "13px 22px" }}>
-                  <span
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 500,
-                      color: "var(--text)",
-                    }}
-                  >
-                    {e.domain}
-                  </span>
-                </td>
-                <td style={{ padding: "13px 22px" }}>
-                  <span
-                    style={{
-                      fontSize: 11.5,
-                      fontWeight: 600,
-                      padding: "3px 8px",
-                      borderRadius: 999,
-                      background:
-                        e.method === "one_click"
-                          ? "rgba(37,99,235,0.1)"
-                          : "var(--surface-2)",
-                      color:
-                        e.method === "one_click" ? "#2563EB" : "var(--text-3)",
-                    }}
-                  >
-                    {e.method === "one_click" ? "⚡ One-click" : "Manual"}
-                  </span>
-                </td>
-                <td style={{ padding: "13px 22px" }}>
-                  <span style={{ fontSize: 13, color: "var(--text-2)" }}>
-                    {e.source}
-                  </span>
-                </td>
-                <td style={{ padding: "13px 22px" }}>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      color: "var(--text-3)",
-                      fontFamily: "var(--font-mono)",
-                    }}
-                  >
-                    {e.time}
-                  </span>
-                </td>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {events.map((e) => (
+                <tr
+                  key={e.id}
+                  style={{
+                    borderBottom: "1px solid var(--border)",
+                    transition: "background 0.12s",
+                  }}
+                  onMouseEnter={(ev) => {
+                    (ev.currentTarget as HTMLTableRowElement).style.background =
+                      "var(--surface-2)";
+                  }}
+                  onMouseLeave={(ev) => {
+                    (ev.currentTarget as HTMLTableRowElement).style.background =
+                      "transparent";
+                  }}
+                >
+                  <td style={{ padding: "13px 22px" }}>
+                    <span
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 500,
+                        color: "var(--text)",
+                      }}
+                    >
+                      {e.domain?.domain}
+                    </span>
+                  </td>
+                  <td style={{ padding: "13px 22px" }}>
+                    <span
+                      style={{
+                        fontSize: 11.5,
+                        fontWeight: 600,
+                        padding: "3px 8px",
+                        borderRadius: 999,
+                        background:
+                          e.sourceEsp === "one_click"
+                            ? "rgba(37,99,235,0.1)"
+                            : "var(--surface-2)",
+                        color:
+                          e.sourceEsp === "one_click"
+                            ? "#2563EB"
+                            : "var(--text-3)",
+                      }}
+                    >
+                      {e.sourceEsp === "one_click" ? "⚡ One-click" : "Manual"}
+                    </span>
+                  </td>
+                  <td style={{ padding: "13px 22px" }}>
+                    <span style={{ fontSize: 13, color: "var(--text-2)" }}>
+                      {e.sourceEsp || "Unknown"}
+                    </span>
+                  </td>
+                  <td style={{ padding: "13px 22px" }}>
+                    <span
+                      style={{
+                        fontSize: 12,
+                        color: "var(--text-3)",
+                        fontFamily: "var(--font-mono)",
+                      }}
+                    >
+                      {timeAgo(e.occurredAt)}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );

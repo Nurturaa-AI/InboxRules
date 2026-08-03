@@ -1,17 +1,10 @@
-// src/middleware/auth.ts
-//
-// This middleware runs on every request and does two things:
-// 1. Verifies the user's JWT token from Clerk
-// 2. Looks up the user in our database and attaches their tenantId
-//
-// If the token is missing or invalid, the request is rejected
-// before it reaches any route handler.
+// Verifies Clerk JWTs using their public JWKS endpoint.
+// jose is a lightweight JWT library — no Clerk SDK needed.
 
-import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+import { FastifyRequest, FastifyReply } from "fastify";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import db from "../db";
 
-// Extend Fastify's request type so TypeScript knows
-// about the tenantId and userId we attach in this middleware
 declare module "fastify" {
   interface FastifyRequest {
     tenantId: string;
@@ -19,15 +12,51 @@ declare module "fastify" {
   }
 }
 
+// Build the Clerk JWKS URL from the publishable key
+// pk_test_abc123 → https://abc123.clerk.accounts.dev/.well-known/jwks.json
+// pk_live_abc123 → https://abc123.clerk.accounts.com/.well-known/jwks.json
+function getJwksUrl(): string {
+  const pk = process.env.CLERK_PUBLISHABLE_KEY || "";
+
+  if (!pk) {
+    throw new Error("CLERK_PUBLISHABLE_KEY is not set in .env");
+  }
+
+  // Extract the instance part from the publishable key
+  // pk_test_XXXXXXXXXX → XXXXXXXXXX
+  const withoutPrefix = pk.replace(/^pk_(test|live)_/, "");
+
+  // Clerk encodes the frontend API URL in the key as base64.
+  try {
+    const decoded = Buffer.from(withoutPrefix, "base64").toString("utf8");
+    const frontendApiUrl = decoded.replace(/\$+$/, "").trim();
+
+    return `${frontendApiUrl}/.well-known/jwks.json`;
+  } catch {
+    const fragment = withoutPrefix.toLowerCase();
+
+    return `https://${fragment}.clerk.accounts.dev/.well-known/jwks.json`;
+  }
+}
+
+// Cache the JWKS set so we don't fetch it on every request
+let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+
+function getJwks() {
+  if (!jwks) {
+    const url = getJwksUrl();
+    jwks = createRemoteJWKSet(new URL(url));
+  }
+  return jwks;
+}
+
 export async function authMiddleware(
   request: FastifyRequest,
   reply: FastifyReply,
 ) {
-  // Get the Authorization header
-  // It should look like: "Bearer eyJhbGciOiJSUzI1NiJ9..."
   const authHeader = request.headers.authorization;
 
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  if (!authHeader?.startsWith("Bearer ")) {
     return reply.status(401).send({
       error: {
         code: "UNAUTHORIZED",
@@ -36,74 +65,52 @@ export async function authMiddleware(
     });
   }
 
-  // Extract the token (remove the "Bearer " prefix)
   const token = authHeader.substring(7);
 
-  if (!token) {
+  if (!token || token === "null" || token === "undefined") {
     return reply.status(401).send({
-      error: {
-        code: "UNAUTHORIZED",
-        message: "Token is missing",
-      },
+      error: { code: "UNAUTHORIZED", message: "Token is missing" },
     });
   }
 
   try {
-    // Verify the token with Clerk
-    // We call Clerk's API to validate the token
-    const clerkResponse = await fetch(
-      "https://api.clerk.com/v1/tokens/verify",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.CLERK_SECRET_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ token }),
-      },
-    );
+    // Verify the JWT using Clerk's public keys
+    const { payload } = await jwtVerify(token, getJwks(), {
+      // Allow 60 seconds of clock skew — fixes the clock skew issue
+      clockTolerance: 60,
+    });
 
-    if (!clerkResponse.ok) {
-      return reply.status(401).send({
-        error: {
-          code: "INVALID_TOKEN",
-          message: "Your session has expired. Please log in again.",
-        },
-      });
+    const clerkUserId = payload.sub;
+
+    if (!clerkUserId) {
+      throw new Error("Token has no subject");
     }
 
-    const clerkData = (await clerkResponse.json()) as { sub: string };
-
-    // clerkData.sub is the Clerk user ID e.g. "user_2abc123"
-    const clerkUserId = clerkData.sub;
-
-    // Look up the user in our database using their Clerk ID
+    // Look up user in our database
     const user = await db.user.findFirst({
-      where: {
-        clerkId: clerkUserId,
-        deletedAt: null,
-      },
+      where: { clerkId: clerkUserId, deletedAt: null },
     });
 
     if (!user) {
+      request.log.warn({ clerkUserId }, "Clerk user not in DB — run seed");
       return reply.status(401).send({
         error: {
           code: "USER_NOT_FOUND",
-          message: "User account not found. Please sign up first.",
+          message: "User not found. Please contact support.",
         },
       });
     }
 
-    // Attach the tenant and user IDs to the request object
-    // All route handlers can now access request.tenantId and request.userId
     request.tenantId = user.tenantId;
     request.userId = user.id;
-  } catch (err: any) {
-    request.log.error({ err }, "Auth middleware error");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    request.log.error({ message }, "Token verification failed");
+
     return reply.status(401).send({
       error: {
-        code: "AUTH_ERROR",
-        message: "Authentication failed. Please try again.",
+        code: "INVALID_TOKEN",
+        message: "Session expired. Please log in again.",
       },
     });
   }

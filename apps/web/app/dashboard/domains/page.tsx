@@ -1,103 +1,47 @@
 "use client";
 
 import { useState } from "react";
+import { useAuth } from "@clerk/nextjs";
 import {
+  Plus,
+  Search,
   RefreshCw,
   ExternalLink,
   Trash2,
-  Plus,
-  Search,
   CheckCircle,
   XCircle,
   AlertCircle,
-  Clock,
 } from "lucide-react";
+import { useApiQuery, apiRequest } from "@/lib/useApiQuery";
+import AddDomainWizard from "@/components/dashboard/AddDomainWizard";
 
-const DOMAINS = [
-  {
-    id: "1",
-    domain: "acme.com",
-    esp: "SendGrid",
-    score: 95,
-    spf: "pass",
-    dkim: "pass",
-    dmarc: "pass",
-    unsubStatus: "active",
-    checked: "2 min ago",
-    addedDate: "Jan 12, 2025",
-    emails7d: "45,230",
-  },
-  {
-    id: "2",
-    domain: "techcorp.io",
-    esp: "Mailgun",
-    score: 78,
-    spf: "pass",
-    dkim: "pass",
-    dmarc: "warn",
-    unsubStatus: "active",
-    checked: "14 min ago",
-    addedDate: "Feb 3, 2025",
-    emails7d: "12,450",
-  },
-  {
-    id: "3",
-    domain: "startup.co",
-    esp: "Google Workspace",
-    score: 42,
-    spf: "fail",
-    dkim: "pass",
-    dmarc: "none",
-    unsubStatus: "inactive",
-    checked: "1 hr ago",
-    addedDate: "Mar 1, 2025",
-    emails7d: "3,200",
-  },
-  {
-    id: "4",
-    domain: "newsletter.dev",
-    esp: "Amazon SES",
-    score: 88,
-    spf: "pass",
-    dkim: "pass",
-    dmarc: "pass",
-    unsubStatus: "active",
-    checked: "3 hr ago",
-    addedDate: "Mar 15, 2025",
-    emails7d: "98,100",
-  },
-  {
-    id: "5",
-    domain: "agency.xyz",
-    esp: "Postmark",
-    score: 61,
-    spf: "pass",
-    dkim: "warn",
-    dmarc: "warn",
-    unsubStatus: "active",
-    checked: "6 hr ago",
-    addedDate: "Apr 2, 2025",
-    emails7d: "7,850",
-  },
-  {
-    id: "6",
-    domain: "hookdropi.qzz.io",
-    esp: "Unknown",
-    score: 0,
-    spf: "none",
-    dkim: "none",
-    dmarc: "none",
-    unsubStatus: "inactive",
-    checked: "12 hr ago",
-    addedDate: "May 8, 2025",
-    emails7d: "0",
-  },
-];
+interface Domain {
+  id: string;
+  domain: string;
+  detectedEsp: string | null;
+  healthScore: number;
+  spfStatus: string;
+  dkimStatus: string;
+  dmarcStatus: string;
+  unsubStatus: string;
+  lastCheckedAt: string | null;
+  createdAt: string;
+}
 
 function scoreColor(s: number) {
   if (s >= 80) return "#10B981";
   if (s >= 60) return "#F59E0B";
   return "#EF4444";
+}
+
+function timeAgo(d: string | null) {
+  if (!d) return "Never";
+  const mins = Math.floor((Date.now() - new Date(d).getTime()) / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
 
 function Pill({ status }: { status: string }) {
@@ -120,24 +64,34 @@ function Pill({ status }: { status: string }) {
       color: "#F59E0B",
       icon: <AlertCircle size={10} />,
     },
-    none: {
-      bg: "var(--surface-2)",
-      color: "var(--text-3)",
-      icon: <Clock size={10} />,
+    softfail: {
+      bg: "rgba(245,158,11,0.1)",
+      color: "#F59E0B",
+      icon: <AlertCircle size={10} />,
     },
+    none: { bg: "var(--surface-2)", color: "var(--text-3)", icon: null },
+    missing: {
+      bg: "rgba(239,68,68,0.1)",
+      color: "#EF4444",
+      icon: <XCircle size={10} />,
+    },
+    unknown: { bg: "var(--surface-2)", color: "var(--text-3)", icon: null },
   };
   const s = map[status] ?? map.none;
   const labels: Record<string, string> = {
     pass: "Pass",
     fail: "Fail",
     warn: "Warn",
+    softfail: "Soft",
     none: "None",
+    missing: "Missing",
+    unknown: "—",
   };
   return (
     <span
       className="inline-flex items-center gap-1"
       style={{
-        padding: "3px 8px",
+        padding: "3px 9px",
         borderRadius: 999,
         fontSize: 11.5,
         fontWeight: 600,
@@ -151,22 +105,73 @@ function Pill({ status }: { status: string }) {
 }
 
 export default function DomainsPage() {
+  const { getToken } = useAuth();
+  const { data, loading, error, refetch } =
+    useApiQuery<Domain[]>("/domains?limit=100");
   const [search, setSearch] = useState("");
   const [scanning, setScanning] = useState<string | null>(null);
-  const [showAdd, setShowAdd] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [showWizard, setShowWizard] = useState(false);
 
-  const filtered = DOMAINS.filter(
+  const domains = data || [];
+  const filtered = domains.filter(
     (d) =>
       d.domain.toLowerCase().includes(search.toLowerCase()) ||
-      d.esp.toLowerCase().includes(search.toLowerCase()),
+      (d.detectedEsp || "").toLowerCase().includes(search.toLowerCase()),
   );
 
-  const healthy = DOMAINS.filter((d) => d.score >= 80).length;
-  const warning = DOMAINS.filter((d) => d.score >= 50 && d.score < 80).length;
-  const critical = DOMAINS.filter((d) => d.score < 50).length;
+  const healthy = domains.filter((d) => d.healthScore >= 80).length;
+  const warning = domains.filter(
+    (d) => d.healthScore >= 50 && d.healthScore < 80,
+  ).length;
+  const critical = domains.filter((d) => d.healthScore < 50).length;
+
+  async function handleScan(id: string) {
+    setScanning(id);
+    try {
+      const token = await getToken();
+      if (!token) {
+        throw new Error("No auth token found");
+      }
+      await apiRequest(`/domains/${id}/scan`, "POST", token);
+      setTimeout(() => {
+        refetch();
+        setScanning(null);
+      }, 3000);
+    } catch {
+      setScanning(null);
+    }
+  }
+
+  async function handleDelete(id: string, name: string) {
+    if (!confirm(`Remove ${name} from monitoring?`)) return;
+    setDeleting(id);
+    try {
+      const token = await getToken();
+      if (!token) {
+        throw new Error("No auth token found");
+      }
+      await apiRequest(`/domains/${id}`, "DELETE", token);
+      refetch();
+    } catch {
+      alert("Failed to remove domain");
+    } finally {
+      setDeleting(null);
+    }
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {showWizard && (
+        <AddDomainWizard
+          onClose={() => setShowWizard(false)}
+          onDomainAdded={() => {
+            refetch();
+            setShowWizard(false);
+          }}
+        />
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
@@ -181,11 +186,13 @@ export default function DomainsPage() {
             Domains
           </h1>
           <p style={{ fontSize: 13, color: "var(--text-3)", marginTop: 4 }}>
-            {DOMAINS.length} domains being monitored in real time
+            {loading
+              ? "Loading..."
+              : `${domains.length} domain${domains.length !== 1 ? "s" : ""} being monitored`}
           </p>
         </div>
         <button
-          onClick={() => setShowAdd(true)}
+          onClick={() => setShowWizard(true)}
           className="flex items-center gap-2"
           style={{
             height: 38,
@@ -254,16 +261,16 @@ export default function DomainsPage() {
                 height: 44,
                 borderRadius: 12,
                 background: item.bg,
+                color: item.color,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 fontSize: 22,
                 fontWeight: 800,
-                color: item.color,
                 fontFamily: "var(--font-mono)",
               }}
             >
-              {item.count}
+              {loading ? "—" : item.count}
             </div>
             <div>
               <p
@@ -326,379 +333,336 @@ export default function DomainsPage() {
               }}
             />
           </div>
-          <span
+          <button
+            onClick={refetch}
             style={{
-              fontSize: 12.5,
+              width: 36,
+              height: 36,
+              borderRadius: 9,
+              border: "1px solid var(--border)",
+              background: "var(--surface-2)",
+              cursor: "pointer",
               color: "var(--text-3)",
-              marginLeft: "auto",
-              fontFamily: "var(--font-mono)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
-            {filtered.length} of {DOMAINS.length}
-          </span>
+            <RefreshCw size={14} className={loading ? "spin" : ""} />
+          </button>
         </div>
 
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr
+        {/* Loading / Error / Empty / Table */}
+        {loading ? (
+          <div style={{ padding: 60, textAlign: "center" }}>
+            <RefreshCw
+              size={24}
+              color="var(--text-3)"
+              className="spin"
+              style={{ margin: "0 auto" }}
+            />
+            <p style={{ fontSize: 13, color: "var(--text-3)", marginTop: 12 }}>
+              Loading domains...
+            </p>
+          </div>
+        ) : error ? (
+          <div style={{ padding: 40, textAlign: "center" }}>
+            <p style={{ fontSize: 14, color: "#EF4444", fontWeight: 600 }}>
+              Failed to load
+            </p>
+            <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 4 }}>
+              {error}
+            </p>
+            <button
+              onClick={refetch}
+              style={{
+                marginTop: 12,
+                padding: "8px 16px",
+                background: "#2563EB",
+                color: "white",
+                border: "none",
+                borderRadius: 9,
+                cursor: "pointer",
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: 60, textAlign: "center" }}>
+            <p style={{ fontSize: 32, marginBottom: 12 }}>🌐</p>
+            <p style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
+              {domains.length === 0 ? "No domains yet" : "No results"}
+            </p>
+            <p style={{ fontSize: 13, color: "var(--text-3)", marginTop: 6 }}>
+              {domains.length === 0
+                ? "Add your first domain to start monitoring"
+                : "Try a different search"}
+            </p>
+            {domains.length === 0 && (
+              <button
+                onClick={() => setShowWizard(true)}
                 style={{
-                  borderBottom: "1px solid var(--border)",
-                  background: "var(--surface-2)",
+                  marginTop: 20,
+                  padding: "10px 20px",
+                  background: "linear-gradient(135deg, #2563EB, #7C3AED)",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 10,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
                 }}
               >
-                {[
-                  "Domain",
-                  "Health",
-                  "SPF",
-                  "DKIM",
-                  "DMARC",
-                  "Unsubscribe",
-                  "Emails (7d)",
-                  "Added",
-                  "",
-                ].map((h) => (
-                  <th
-                    key={h}
-                    style={{
-                      textAlign: "left",
-                      padding: "10px 22px",
-                      fontSize: 11,
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.07em",
-                      color: "var(--text-3)",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((d) => (
+                + Add Your First Domain
+              </button>
+            )}
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
                 <tr
-                  key={d.id}
                   style={{
                     borderBottom: "1px solid var(--border)",
-                    transition: "background 0.12s",
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLTableRowElement).style.background =
-                      "var(--surface-2)";
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLTableRowElement).style.background =
-                      "transparent";
+                    background: "var(--surface-2)",
                   }}
                 >
-                  <td style={{ padding: "14px 22px" }}>
-                    <div className="flex items-center gap-3">
-                      <div
-                        style={{
-                          width: 34,
-                          height: 34,
-                          borderRadius: 9,
-                          background: "var(--surface-2)",
-                          border: "1px solid var(--border)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: "var(--text-3)",
-                          fontFamily: "var(--font-mono)",
-                        }}
-                      >
-                        {d.domain.substring(0, 2).toUpperCase()}
-                      </div>
-                      <div>
-                        <p
+                  {[
+                    "Domain",
+                    "Health",
+                    "SPF",
+                    "DKIM",
+                    "DMARC",
+                    "Last Checked",
+                    "Added",
+                    "",
+                  ].map((h) => (
+                    <th
+                      key={h}
+                      style={{
+                        textAlign: "left",
+                        padding: "10px 22px",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.07em",
+                        color: "var(--text-3)",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((d) => (
+                  <tr
+                    key={d.id}
+                    style={{
+                      borderBottom: "1px solid var(--border)",
+                      transition: "background 0.12s",
+                    }}
+                    onMouseEnter={(e) => {
+                      (
+                        e.currentTarget as HTMLTableRowElement
+                      ).style.background = "var(--surface-2)";
+                    }}
+                    onMouseLeave={(e) => {
+                      (
+                        e.currentTarget as HTMLTableRowElement
+                      ).style.background = "transparent";
+                    }}
+                  >
+                    <td style={{ padding: "14px 22px" }}>
+                      <div className="flex items-center gap-3">
+                        <div
                           style={{
-                            fontWeight: 600,
-                            fontSize: 13.5,
-                            color: "var(--text)",
-                          }}
-                        >
-                          {d.domain}
-                        </p>
-                        <p
-                          style={{
-                            fontSize: 11.5,
+                            width: 34,
+                            height: 34,
+                            borderRadius: 9,
+                            background: "var(--surface-2)",
+                            border: "1px solid var(--border)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: 11,
+                            fontWeight: 700,
                             color: "var(--text-3)",
                             fontFamily: "var(--font-mono)",
-                            marginTop: 1,
                           }}
                         >
-                          {d.esp}
-                        </p>
+                          {d.domain.substring(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <p
+                            style={{
+                              fontWeight: 600,
+                              fontSize: 13.5,
+                              color: "var(--text)",
+                            }}
+                          >
+                            {d.domain}
+                          </p>
+                          <p
+                            style={{
+                              fontSize: 11.5,
+                              color: "var(--text-3)",
+                              fontFamily: "var(--font-mono)",
+                              marginTop: 1,
+                            }}
+                          >
+                            {d.detectedEsp || "Detecting ESP..."}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  </td>
-                  <td style={{ padding: "14px 22px" }}>
-                    <div
-                      style={{ display: "flex", alignItems: "center", gap: 8 }}
-                    >
+                    </td>
+                    <td style={{ padding: "14px 22px" }}>
                       <div
                         style={{
-                          width: 32,
-                          height: 32,
-                          borderRadius: "50%",
-                          background: `conic-gradient(${scoreColor(d.score)} ${d.score * 3.6}deg, var(--border) 0deg)`,
                           display: "flex",
                           alignItems: "center",
-                          justifyContent: "center",
+                          gap: 8,
                         }}
                       >
                         <div
                           style={{
-                            width: 22,
-                            height: 22,
+                            width: 34,
+                            height: 34,
                             borderRadius: "50%",
-                            background: "var(--surface)",
+                            background: `conic-gradient(${scoreColor(d.healthScore)} ${d.healthScore * 3.6}deg, var(--border) 0deg)`,
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
-                            fontSize: 8,
-                            fontWeight: 800,
-                            color: scoreColor(d.score),
-                            fontFamily: "var(--font-mono)",
                           }}
                         >
-                          {d.score}
+                          <div
+                            style={{
+                              width: 24,
+                              height: 24,
+                              borderRadius: "50%",
+                              background: "var(--surface)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 8,
+                              fontWeight: 800,
+                              color: scoreColor(d.healthScore),
+                              fontFamily: "var(--font-mono)",
+                            }}
+                          >
+                            {d.healthScore}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </td>
-                  <td style={{ padding: "14px 22px" }}>
-                    <Pill status={d.spf} />
-                  </td>
-                  <td style={{ padding: "14px 22px" }}>
-                    <Pill status={d.dkim} />
-                  </td>
-                  <td style={{ padding: "14px 22px" }}>
-                    <Pill status={d.dmarc} />
-                  </td>
-                  <td style={{ padding: "14px 22px" }}>
-                    <span
-                      style={{
-                        fontSize: 11.5,
-                        fontWeight: 600,
-                        padding: "3px 9px",
-                        borderRadius: 999,
-                        background:
-                          d.unsubStatus === "active"
-                            ? "rgba(16,185,129,0.1)"
-                            : "var(--surface-2)",
-                        color:
-                          d.unsubStatus === "active"
-                            ? "#10B981"
-                            : "var(--text-3)",
-                      }}
-                    >
-                      {d.unsubStatus === "active" ? "● Active" : "○ Inactive"}
-                    </span>
-                  </td>
-                  <td style={{ padding: "14px 22px" }}>
-                    <span
-                      style={{
-                        fontSize: 13,
-                        fontFamily: "var(--font-mono)",
-                        color: "var(--text-2)",
-                        fontWeight: 600,
-                      }}
-                    >
-                      {d.emails7d}
-                    </span>
-                  </td>
-                  <td style={{ padding: "14px 22px" }}>
-                    <span
-                      style={{
-                        fontSize: 12,
-                        color: "var(--text-3)",
-                        fontFamily: "var(--font-mono)",
-                      }}
-                    >
-                      {d.addedDate}
-                    </span>
-                  </td>
-                  <td style={{ padding: "14px 22px" }}>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => {
-                          setScanning(d.id);
-                          setTimeout(() => setScanning(null), 2500);
-                        }}
-                        className="flex items-center gap-1"
+                    </td>
+                    <td style={{ padding: "14px 22px" }}>
+                      <Pill status={d.spfStatus} />
+                    </td>
+                    <td style={{ padding: "14px 22px" }}>
+                      <Pill status={d.dkimStatus} />
+                    </td>
+                    <td style={{ padding: "14px 22px" }}>
+                      <Pill status={d.dmarcStatus} />
+                    </td>
+                    <td style={{ padding: "14px 22px" }}>
+                      <span
                         style={{
-                          padding: "5px 10px",
-                          borderRadius: 8,
+                          fontSize: 12.5,
+                          color: "var(--text-3)",
+                          fontFamily: "var(--font-mono)",
+                        }}
+                      >
+                        {timeAgo(d.lastCheckedAt)}
+                      </span>
+                    </td>
+                    <td style={{ padding: "14px 22px" }}>
+                      <span
+                        style={{
                           fontSize: 12,
-                          fontWeight: 600,
-                          cursor: "pointer",
-                          border: "none",
-                          fontFamily: "var(--font-sans)",
-                          background: "rgba(37,99,235,0.1)",
-                          color: "#2563EB",
-                        }}
-                      >
-                        <RefreshCw
-                          size={11}
-                          className={scanning === d.id ? "spin" : ""}
-                        />
-                        {scanning === d.id ? "Scanning" : "Scan"}
-                      </button>
-                      <button
-                        style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 7,
-                          border: "1px solid var(--border)",
-                          background: "var(--surface)",
                           color: "var(--text-3)",
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
+                          fontFamily: "var(--font-mono)",
                         }}
                       >
-                        <ExternalLink size={12} />
-                      </button>
-                      <button
-                        style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 7,
-                          border: "1px solid var(--border)",
-                          background: "var(--surface)",
-                          color: "var(--text-3)",
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Add modal */}
-      {showAdd && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.5)",
-            backdropFilter: "blur(4px)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 50,
-          }}
-          onClick={() => setShowAdd(false)}
-        >
-          <div
-            style={{
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: 20,
-              padding: 32,
-              width: 440,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2
-              style={{
-                fontSize: 18,
-                fontWeight: 800,
-                color: "var(--text)",
-                marginBottom: 6,
-              }}
-            >
-              Add New Domain
-            </h2>
-            <p
-              style={{ fontSize: 13, color: "var(--text-3)", marginBottom: 24 }}
-            >
-              Enter a domain to start monitoring its email compliance health
-            </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <div>
-                <label
-                  style={{
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    color: "var(--text-2)",
-                    display: "block",
-                    marginBottom: 6,
-                  }}
-                >
-                  Domain Name
-                </label>
-                <input
-                  placeholder="e.g. acme.com"
-                  style={{
-                    width: "100%",
-                    height: 40,
-                    padding: "0 14px",
-                    background: "var(--surface-2)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 10,
-                    fontSize: 14,
-                    color: "var(--text)",
-                    fontFamily: "var(--font-sans)",
-                    outline: "none",
-                  }}
-                />
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowAdd(false)}
-                  style={{
-                    flex: 1,
-                    height: 40,
-                    background: "var(--surface-2)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 10,
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    color: "var(--text-2)",
-                    fontFamily: "var(--font-sans)",
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => setShowAdd(false)}
-                  style={{
-                    flex: 1,
-                    height: 40,
-                    background: "linear-gradient(135deg, #2563EB, #7C3AED)",
-                    border: "none",
-                    borderRadius: 10,
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    color: "white",
-                    fontFamily: "var(--font-sans)",
-                  }}
-                >
-                  Add & Scan Domain
-                </button>
-              </div>
-            </div>
+                        {new Date(d.createdAt).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}
+                      </span>
+                    </td>
+                    <td style={{ padding: "14px 22px" }}>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleScan(d.id)}
+                          className="flex items-center gap-1"
+                          style={{
+                            padding: "5px 10px",
+                            borderRadius: 8,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            border: "none",
+                            fontFamily: "var(--font-sans)",
+                            background: "rgba(37,99,235,0.1)",
+                            color: "#2563EB",
+                          }}
+                        >
+                          <RefreshCw
+                            size={11}
+                            className={scanning === d.id ? "spin" : ""}
+                          />
+                          {scanning === d.id ? "Scanning" : "Scan"}
+                        </button>
+                        <button
+                          onClick={() =>
+                            window.open(`https://${d.domain}`, "_blank")
+                          }
+                          style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: 7,
+                            border: "1px solid var(--border)",
+                            background: "var(--surface)",
+                            color: "var(--text-3)",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <ExternalLink size={12} />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(d.id, d.domain)}
+                          disabled={deleting === d.id}
+                          style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: 7,
+                            border: "1px solid var(--border)",
+                            background: "var(--surface)",
+                            color: "var(--text-3)",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

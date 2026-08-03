@@ -1,12 +1,14 @@
 "use client";
+
 import { useState, useEffect } from "react";
 import Header from "./Header";
 
-export default function DashboardShell({
-  children,
-}: {
+interface Props {
   children: React.ReactNode;
-}) {
+  onAddDomain?: () => void;
+}
+
+export default function DashboardShell({ children, onAddDomain }: Props) {
   const [theme, setTheme] = useState<"light" | "dark">("light");
 
   useEffect(() => {
@@ -25,6 +27,7 @@ export default function DashboardShell({
       <Header
         theme={theme}
         onToggleTheme={() => applyTheme(theme === "light" ? "dark" : "light")}
+        onAddDomain={onAddDomain}
       />
       <main
         className="flex-1 overflow-y-auto"

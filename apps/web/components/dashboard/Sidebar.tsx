@@ -1,10 +1,8 @@
-// The left navigation sidebar.
-// Always dark regardless of light/dark mode (like BankDash reference).
-
 "use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useUser, useClerk } from "@clerk/nextjs";
 import {
   LayoutDashboard,
   Globe,
@@ -12,14 +10,13 @@ import {
   Mail,
   Bell,
   BarChart3,
-  Settings,
   CreditCard,
+  Settings,
   LogOut,
   Inbox,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import Image from "next/image";
 
-// Navigation items — each maps to a route
 const NAV_ITEMS = [
   {
     section: "Main",
@@ -48,95 +45,233 @@ const NAV_ITEMS = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const { user } = useUser();
+  const { signOut } = useClerk();
+
+  // Get display name from Clerk user object
+  const displayName = user?.firstName
+    ? `${user.firstName} ${user.lastName || ""}`.trim()
+    : user?.emailAddresses?.[0]?.emailAddress?.split("@")[0] || "User";
+
+  // Get initials for avatar fallback
+  const initials =
+    user?.firstName && user?.lastName
+      ? `${user.firstName[0]}${user.lastName[0]}`.toUpperCase()
+      : displayName.substring(0, 2).toUpperCase();
 
   return (
-    // Sidebar background is always dark — uses fixed dark colors
-    // not the theme variables so it stays dark in both modes
-    <aside className="w-55 min-w-55 bg-[#0B1120] flex flex-col border-r border-white/6 ">
-      {/* Brand */}
-      <div className="flex items-center gap-2.5 px-5 py-6 border-b border-white/6">
-        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shrink-0">
-          <Inbox className="w-4 h-4 text-white" />
+    <aside
+      className="flex flex-col shrink-0"
+      style={{
+        width: 228,
+        minWidth: 228,
+        background: "#060D1F",
+        borderRight: "1px solid rgba(255,255,255,0.05)",
+      }}
+    >
+      {/* ── Brand ── */}
+      <div
+        className="flex items-center gap-3"
+        style={{
+          padding: "22px 18px",
+          borderBottom: "1px solid rgba(255,255,255,0.05)",
+        }}
+      >
+        <div
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 10,
+            flexShrink: 0,
+            background: "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)",
+            boxShadow: "0 4px 12px rgba(37,99,235,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Inbox size={17} color="white" strokeWidth={2.5} />
         </div>
-        <span className="text-white font-extrabold text-[15px] tracking-tight">
-          Inbox<span className="text-blue-500">Rules</span>
-        </span>
+        <div>
+          <p
+            style={{
+              color: "white",
+              fontWeight: 800,
+              fontSize: 15.5,
+              letterSpacing: "-0.3px",
+              lineHeight: 1,
+            }}
+          >
+            Inbox<span style={{ color: "#60A5FA" }}>Rules</span>
+          </p>
+          <p
+            style={{
+              color: "#1E3A5F",
+              fontSize: 10,
+              marginTop: 3,
+              fontWeight: 500,
+            }}
+          >
+            Compliance Platform
+          </p>
+        </div>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto">
+      {/* ── Navigation ── */}
+      <nav className="flex-1 overflow-y-auto" style={{ padding: "18px 10px" }}>
         {NAV_ITEMS.map((section) => (
-          <div key={section.section}>
-            {/* Section label */}
+          <div key={section.section} style={{ marginBottom: 26 }}>
             <p
-              className="text-[10px] font-bold uppercase tracking-widest
-                          text-slate-500 px-3 mb-1.5"
+              style={{
+                fontSize: 9.5,
+                fontWeight: 700,
+                letterSpacing: "0.1em",
+                color: "#1E3A5F",
+                padding: "0 10px",
+                marginBottom: 6,
+              }}
             >
               {section.section}
             </p>
 
-            {/* Items */}
-            <div className="space-y-0.5">
-              {section.items.map((item) => {
-                const isActive = pathname === item.href;
-                const Icon = item.icon;
+            {section.items.map((item) => {
+              const isActive =
+                item.href === "/dashboard"
+                  ? pathname === "/dashboard"
+                  : pathname.startsWith(item.href);
+              const Icon = item.icon;
 
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={cn(
-                      "flex items-center gap-2.5 px-3 py-2 rounded-lg",
-                      "text-[13px] font-medium transition-all duration-150",
-                      isActive
-                        ? // Active: solid blue background
-                          "bg-blue-600 text-white"
-                        : // Inactive: muted text, hover lightens background
-                          "text-slate-400 hover:text-slate-100 hover:bg-white/6",
-                    )}
-                  >
-                    <Icon className="w-4 h-4 shrink-0" />
-                    <span className="flex-1">{item.label}</span>
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "9px 10px",
+                    borderRadius: 10,
+                    marginBottom: 2,
+                    fontSize: 13,
+                    fontWeight: isActive ? 600 : 500,
+                    textDecoration: "none",
+                    color: isActive ? "#FFFFFF" : "#3D5A80",
+                    background: isActive
+                      ? "linear-gradient(135deg, rgba(37,99,235,0.85), rgba(124,58,237,0.7))"
+                      : "transparent",
+                    boxShadow: isActive
+                      ? "0 4px 12px rgba(37,99,235,0.25)"
+                      : "none",
+                    transition: "all 0.15s",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive) {
+                      const el = e.currentTarget as HTMLAnchorElement;
+                      el.style.background = "rgba(255,255,255,0.05)";
+                      el.style.color = "#7FA3C8";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive) {
+                      const el = e.currentTarget as HTMLAnchorElement;
+                      el.style.background = "transparent";
+                      el.style.color = "#3D5A80";
+                    }
+                  }}
+                >
+                  <Icon
+                    size={15}
+                    strokeWidth={isActive ? 2.5 : 2}
+                    style={{ flexShrink: 0 }}
+                  />
+                  <span style={{ flex: 1 }}>{item.label}</span>
 
-                    {/* Alert badge */}
-                    {"badge" in item && item.badge ? (
-                      <span
-                        className="bg-red-500 text-white text-[10px]
-                                       font-bold px-1.5 py-0.5 rounded-full
-                                       font-mono leading-none"
-                      >
-                        {item.badge}
-                      </span>
-                    ) : null}
-                  </Link>
-                );
-              })}
-            </div>
+                  {"badge" in item && item.badge ? (
+                    <span
+                      style={{
+                        background: "#EF4444",
+                        color: "white",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        padding: "1px 6px",
+                        borderRadius: 999,
+                      }}
+                    >
+                      {item.badge}
+                    </span>
+                  ) : null}
+                </Link>
+              );
+            })}
           </div>
         ))}
       </nav>
 
-      {/* User section at bottom */}
-      <div className="p-3 border-t border-white/6">
+      {/* ── User ── */}
+      <div
+        style={{
+          padding: "12px 10px",
+          borderTop: "1px solid rgba(255,255,255,0.05)",
+        }}
+      >
         <div
-          className="flex items-center gap-2.5 px-3 py-2 rounded-lg
-                        cursor-pointer hover:bg-white/6 transition-colors"
+          className="flex items-center gap-2.5 rounded-xl cursor-pointer"
+          style={{ padding: "9px 10px" }}
+          onClick={() => signOut({ redirectUrl: "/sign-in" })}
+          title="Sign out"
         >
-          {/* Avatar with gradient */}
-          <div
-            className="w-8 h-8 rounded-full bg-linear-to-br from-blue-500
-                          to-violet-600 flex items-center justify-center
-                          shrink-0 text-white text-xs font-bold"
-          >
-            PO
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-slate-200 text-[12.5px] font-semibold truncate">
-              Princewill O.
+          {/* Avatar — Clerk profile image or initials */}
+          {user?.imageUrl ? (
+            <Image
+              src={user.imageUrl}
+              alt={displayName}
+              width={34}
+              height={34}
+              style={{
+                borderRadius: "50%",
+                objectFit: "cover",
+                flexShrink: 0,
+              }}
+            />
+          ) : (
+            <div
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: "50%",
+                flexShrink: 0,
+                background: "linear-gradient(135deg, #2563EB, #7C3AED)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 12,
+                fontWeight: 700,
+                color: "white",
+              }}
+            >
+              {initials}
+            </div>
+          )}
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p
+              style={{
+                color: "#CBD5E1",
+                fontSize: 13,
+                fontWeight: 600,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {displayName}
             </p>
-            <p className="text-slate-500 text-[11px]">Pro Plan</p>
+            <p style={{ color: "#1E3A5F", fontSize: 11, marginTop: 1 }}>
+              Pro Plan
+            </p>
           </div>
-          <LogOut className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+
+          <LogOut size={14} color="#1E3A5F" />
         </div>
       </div>
     </aside>

@@ -21,6 +21,7 @@ import {
   billingRoutes,
   billingWebhookRoutes,
 } from "./modules/billing/billing.routes";
+import { clerkWebhookRoutes } from "./modules/auth/clerk-webhook.routes";
 import { suppressionRoutes } from "./modules/suppression/suppression.routes";
 
 // Create the Fastify app instance
@@ -75,79 +76,7 @@ async function buildApp() {
     version: process.env.npm_package_version || "1.0.0",
   }));
 
-  // Add this AFTER the health check route and BEFORE the protected routes block
-  // DELETE THIS before going to production
-
-  app.post("/test/ai/snippet", async (request, reply) => {
-    const { generateHeaderSnippet } =
-      await import("./modules/ai/snippet-generator");
-
-    const body = request.body as {
-      esp: string;
-      domain: string;
-      unsubscribeUrl: string;
-      useCase: string;
-    };
-
-    // Use a fake tenant ID for testing
-    const result = await generateHeaderSnippet(
-      {
-        esp: body.esp || "sendgrid",
-        domain: body.domain || "acme.com",
-        unsubscribeUrl:
-          body.unsubscribeUrl || "https://unsub.inboxrules.io/test",
-        useCase: body.useCase || "marketing",
-      },
-      "test-tenant-id",
-    );
-
-    return reply.send({ data: result });
-  });
-
-  app.post("/test/ai/analyze", async (request, reply) => {
-    const { checkDomain } = await import("./modules/dns-checker/dns.service");
-    const { analyzeEmailHeaders } =
-      await import("./modules/ai/header-analyzer");
-
-    const body = request.body as { domain: string };
-    const domain = body.domain || "github.com";
-
-    // Set SSE headers
-    reply.raw.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    });
-
-    try {
-      // Run DNS check
-      const dnsResult = await checkDomain(domain);
-
-      // Send structured results first
-      reply.raw.write(
-        `event: dns_result\n` + `data: ${JSON.stringify(dnsResult)}\n\n`,
-      );
-
-      // Stream AI analysis
-      const aiStream = analyzeEmailHeaders(dnsResult, "test-tenant-id");
-
-      for await (const token of aiStream) {
-        reply.raw.write(
-          `event: ai_token\n` + `data: ${JSON.stringify({ token })}\n\n`,
-        );
-      }
-
-      reply.raw.write(`event: done\ndata: {}\n\n`);
-    } catch (err: any) {
-      reply.raw.write(
-        `event: error\n` +
-          `data: ${JSON.stringify({ message: err.message })}\n\n`,
-      );
-    } finally {
-      reply.raw.end();
-    }
-  });
-
+  // Suppression internal routes (called by the Cloudflare Worker)
   // (it uses its own internal key auth, not Clerk)
   app.register(suppressionRoutes, { prefix: "" });
 
@@ -180,6 +109,7 @@ async function buildApp() {
 
   // ── Outside protected routes (public webhook) ──
   app.register(billingWebhookRoutes);
+  app.register(clerkWebhookRoutes);
   // app.register(suppressionRoutes); // for /internal/unsubscribe
 
   // ─────────────────────────────────────────────
