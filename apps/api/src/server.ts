@@ -57,6 +57,11 @@ async function buildApp() {
     redis,
     max: 100,
     timeWindow: "1 minute",
+    // Fail OPEN if Redis is unreachable/rate-limited: allow the request through
+    // rather than 500-ing every endpoint (including /health). Without this, an
+    // upstream Redis outage takes the entire API down, because the limiter runs
+    // a Redis command on every request before any route handler.
+    skipOnError: true,
     errorResponseBuilder: () => ({
       error: {
         code: "RATE_LIMIT_EXCEEDED",
@@ -159,16 +164,30 @@ async function start() {
     // These run in the same process as the HTTP server during development.
     // In production, extract these to a separate Railway service
     // by running: node dist/workers/index.js
+    //
+    // Gated behind RUN_WORKERS_INLINE so dev can run the HTTP API WITHOUT the
+    // workers + scheduler. Running all three against one Upstash instance is
+    // what exhausts its per-command rate limit (BullMQ polls constantly). To
+    // work on the API alone: leave RUN_WORKERS_INLINE unset and, if you need
+    // jobs processed, run `pnpm workers` in a second terminal. Set
+    // RUN_WORKERS_INLINE=true to keep the old all-in-one-process behavior.
     // ─────────────────────────────────────────────
+    if (process.env.RUN_WORKERS_INLINE === "true") {
+      // Processes DNS scan jobs from the queue
+      createDnsPollWorker();
 
-    // Processes DNS scan jobs from the queue
-    createDnsPollWorker();
+      // Processes alert notification jobs from the queue
+      createAlertDispatchWorker();
 
-    // Processes alert notification jobs from the queue
-    createAlertDispatchWorker();
+      // Adds DNS scan jobs to the queue on a schedule
+      await runScheduler();
 
-    // Adds DNS scan jobs to the queue on a schedule
-    await runScheduler();
+      console.log("   Background workers: running inline");
+    } else {
+      console.log(
+        "   Background workers: DISABLED (set RUN_WORKERS_INLINE=true or run `pnpm workers`)",
+      );
+    }
   } catch (err) {
     console.error("Failed to start server:", err);
     process.exit(1);
