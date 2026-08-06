@@ -10,13 +10,15 @@ import {
   Search as SearchIcon,
 } from "lucide-react"
 import { useAuth } from "@clerk/nextjs"
+import { toast } from "sonner"
 
-import { domainInitials, timeAgo } from "@/lib/utils"
+import { timeAgo } from "@/lib/utils"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { DataTable, type DataTableColumn } from "@/components/shared/DataTable"
 import { HealthScore } from "@/components/shared/HealthScore"
-import { StatusBadge, statusFromString } from "@/components/shared/StatusBadge"
+import { AuthStatusBadge } from "@/components/shared/AuthStatusBadge"
+import { DomainAvatar } from "@/components/shared/DomainAvatar"
 import { FilterBar } from "@/components/shared/FilterBar"
 import { EmptyState } from "@/components/shared/EmptyState"
 import { ActionMenu } from "@/components/shared/ActionMenu"
@@ -48,26 +50,7 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: "critical", label: "Critical" },
 ]
 
-const STATUS_LABELS: Record<string, string> = {
-  pass: "Pass",
-  fail: "Fail",
-  warn: "Warn",
-  softfail: "Soft",
-  none: "None",
-  unknown: "—",
-  missing: "Missing",
-}
-
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4500"
-
-function AuthPill({ status }: { status: string }) {
-  return (
-    <StatusBadge
-      status={statusFromString(status)}
-      label={STATUS_LABELS[status] ?? status}
-    />
-  )
-}
 
 export default function DomainTable({ onAddDomain }: Props) {
   const { getToken } = useAuth()
@@ -106,20 +89,27 @@ export default function DomainTable({ onAddDomain }: Props) {
   }, [fetchDomains])
 
   // Trigger a manual scan
-  async function handleScan(id: string) {
+  async function handleScan(id: string, name: string) {
     setScanning(id)
     try {
       const token = await getToken()
-      await fetch(`${API_URL}/api/v1/domains/${id}/scan`, {
+      const res = await fetch(`${API_URL}/api/v1/domains/${id}/scan`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) throw new Error("Scan request failed")
+      toast.success(`Scanning ${name}…`, {
+        description: "Results refresh in a few seconds.",
       })
       // Refresh after 3 seconds to show updated score
       setTimeout(() => {
         fetchDomains()
         setScanning(null)
       }, 3000)
-    } catch {
+    } catch (err) {
+      toast.error("Failed to start scan", {
+        description: err instanceof Error ? err.message : undefined,
+      })
       setScanning(null)
     }
   }
@@ -129,14 +119,17 @@ export default function DomainTable({ onAddDomain }: Props) {
     setDeleting(domain.id)
     try {
       const token = await getToken()
-      await fetch(`${API_URL}/api/v1/domains/${domain.id}`, {
+      const res = await fetch(`${API_URL}/api/v1/domains/${domain.id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       })
+      if (!res.ok) throw new Error("Delete request failed")
       setDomains((prev) => prev.filter((d) => d.id !== domain.id))
-    } catch {
-      // surface a lightweight error; a toast system lands in Phase 2
-      setError("Failed to delete domain")
+      toast.success(`${domain.domain} removed from monitoring`)
+    } catch (err) {
+      toast.error("Failed to remove domain", {
+        description: err instanceof Error ? err.message : undefined,
+      })
     } finally {
       setDeleting(null)
     }
@@ -156,9 +149,7 @@ export default function DomainTable({ onAddDomain }: Props) {
       header: "Domain",
       cell: (d) => (
         <div className="flex items-center gap-3">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-muted font-mono text-xs font-bold text-muted-foreground">
-            {domainInitials(d.domain)}
-          </div>
+          <DomainAvatar domain={d.domain} />
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-foreground">
               {d.domain}
@@ -179,17 +170,17 @@ export default function DomainTable({ onAddDomain }: Props) {
     {
       key: "spf",
       header: "SPF",
-      cell: (d) => <AuthPill status={d.spfStatus} />,
+      cell: (d) => <AuthStatusBadge status={d.spfStatus} />,
     },
     {
       key: "dkim",
       header: "DKIM",
-      cell: (d) => <AuthPill status={d.dkimStatus} />,
+      cell: (d) => <AuthStatusBadge status={d.dkimStatus} />,
     },
     {
       key: "dmarc",
       header: "DMARC",
-      cell: (d) => <AuthPill status={d.dmarcStatus} />,
+      cell: (d) => <AuthStatusBadge status={d.dmarcStatus} />,
     },
     {
       key: "lastChecked",
@@ -209,7 +200,7 @@ export default function DomainTable({ onAddDomain }: Props) {
           <Button
             variant="secondary"
             size="xs"
-            onClick={() => handleScan(d.id)}
+            onClick={() => handleScan(d.id, d.domain)}
             disabled={scanning === d.id}
           >
             <RefreshCw className={scanning === d.id ? "animate-spin" : ""} />

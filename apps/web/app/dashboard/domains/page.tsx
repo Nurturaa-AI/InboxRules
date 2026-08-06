@@ -1,668 +1,328 @@
-"use client";
+"use client"
 
-import { useState } from "react";
-import { useAuth } from "@clerk/nextjs";
+import { useState } from "react"
+import { useAuth } from "@clerk/nextjs"
+import { toast } from "sonner"
 import {
   Plus,
-  Search,
   RefreshCw,
   ExternalLink,
   Trash2,
-  CheckCircle,
+  Globe,
+  Search as SearchIcon,
+  ShieldCheck,
+  AlertTriangle,
   XCircle,
-  AlertCircle,
-} from "lucide-react";
-import { useApiQuery, apiRequest } from "@/lib/useApiQuery";
-import AddDomainWizard from "@/components/dashboard/AddDomainWizard";
+} from "lucide-react"
+
+import { useApiQuery, apiRequest } from "@/lib/useApiQuery"
+import { timeAgo } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
+import { PageHeader } from "@/components/shared/PageHeader"
+import { MetricCard } from "@/components/shared/MetricCard"
+import { SearchInput } from "@/components/shared/SearchInput"
+import { DataTable, type DataTableColumn } from "@/components/shared/DataTable"
+import { HealthScore } from "@/components/shared/HealthScore"
+import { AuthStatusBadge } from "@/components/shared/AuthStatusBadge"
+import { DomainAvatar } from "@/components/shared/DomainAvatar"
+import { ActionMenu } from "@/components/shared/ActionMenu"
+import { EmptyState } from "@/components/shared/EmptyState"
+import { LoadingSkeleton } from "@/components/shared/LoadingSkeleton"
+import { ConfirmationDialog } from "@/components/shared/ConfirmationDialog"
+import AddDomainWizard from "@/components/dashboard/AddDomainWizard"
 
 interface Domain {
-  id: string;
-  domain: string;
-  detectedEsp: string | null;
-  healthScore: number;
-  spfStatus: string;
-  dkimStatus: string;
-  dmarcStatus: string;
-  unsubStatus: string;
-  lastCheckedAt: string | null;
-  createdAt: string;
+  id: string
+  domain: string
+  detectedEsp: string | null
+  healthScore: number
+  spfStatus: string
+  dkimStatus: string
+  dmarcStatus: string
+  unsubStatus: string
+  lastCheckedAt: string | null
+  createdAt: string
 }
 
-function scoreColor(s: number) {
-  if (s >= 80) return "#10B981";
-  if (s >= 60) return "#F59E0B";
-  return "#EF4444";
-}
-
-function timeAgo(d: string | null) {
-  if (!d) return "Never";
-  const mins = Math.floor((Date.now() - new Date(d).getTime()) / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
-
-function Pill({ status }: { status: string }) {
-  const map: Record<
-    string,
-    { bg: string; color: string; icon: React.ReactNode }
-  > = {
-    pass: {
-      bg: "rgba(16,185,129,0.1)",
-      color: "#10B981",
-      icon: <CheckCircle size={10} />,
-    },
-    fail: {
-      bg: "rgba(239,68,68,0.1)",
-      color: "#EF4444",
-      icon: <XCircle size={10} />,
-    },
-    warn: {
-      bg: "rgba(245,158,11,0.1)",
-      color: "#F59E0B",
-      icon: <AlertCircle size={10} />,
-    },
-    softfail: {
-      bg: "rgba(245,158,11,0.1)",
-      color: "#F59E0B",
-      icon: <AlertCircle size={10} />,
-    },
-    none: { bg: "var(--surface-2)", color: "var(--text-3)", icon: null },
-    missing: {
-      bg: "rgba(239,68,68,0.1)",
-      color: "#EF4444",
-      icon: <XCircle size={10} />,
-    },
-    unknown: { bg: "var(--surface-2)", color: "var(--text-3)", icon: null },
-  };
-  const s = map[status] ?? map.none;
-  const labels: Record<string, string> = {
-    pass: "Pass",
-    fail: "Fail",
-    warn: "Warn",
-    softfail: "Soft",
-    none: "None",
-    missing: "Missing",
-    unknown: "—",
-  };
-  return (
-    <span
-      className="inline-flex items-center gap-1"
-      style={{
-        padding: "3px 9px",
-        borderRadius: 999,
-        fontSize: 11.5,
-        fontWeight: 600,
-        background: s.bg,
-        color: s.color,
-      }}
-    >
-      {s.icon} {labels[status] ?? status}
-    </span>
-  );
+const DATE_FMT: Intl.DateTimeFormatOptions = {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
 }
 
 export default function DomainsPage() {
-  const { getToken } = useAuth();
+  const { getToken } = useAuth()
   const { data, loading, error, refetch } =
-    useApiQuery<Domain[]>("/domains?limit=100");
-  const [search, setSearch] = useState("");
-  const [scanning, setScanning] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
-  const [showWizard, setShowWizard] = useState(false);
+    useApiQuery<Domain[]>("/domains?limit=100")
 
-  const domains = data || [];
+  const [search, setSearch] = useState("")
+  const [scanning, setScanning] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
+  const [showWizard, setShowWizard] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<Domain | null>(null)
+
+  const domains = data || []
   const filtered = domains.filter(
     (d) =>
       d.domain.toLowerCase().includes(search.toLowerCase()) ||
-      (d.detectedEsp || "").toLowerCase().includes(search.toLowerCase()),
-  );
+      (d.detectedEsp || "").toLowerCase().includes(search.toLowerCase())
+  )
 
-  const healthy = domains.filter((d) => d.healthScore >= 80).length;
+  // Canonical thresholds (shared with HealthScore): ≥80 healthy, ≥60 warning, <60 critical.
+  const healthy = domains.filter((d) => d.healthScore >= 80).length
   const warning = domains.filter(
-    (d) => d.healthScore >= 50 && d.healthScore < 80,
-  ).length;
-  const critical = domains.filter((d) => d.healthScore < 50).length;
+    (d) => d.healthScore >= 60 && d.healthScore < 80
+  ).length
+  const critical = domains.filter((d) => d.healthScore < 60).length
 
-  async function handleScan(id: string) {
-    setScanning(id);
+  async function handleScan(id: string, name: string) {
+    setScanning(id)
     try {
-      const token = await getToken();
-      if (!token) {
-        throw new Error("No auth token found");
-      }
-      await apiRequest(`/domains/${id}/scan`, "POST", token);
+      const token = await getToken()
+      if (!token) throw new Error("No auth token found")
+      await apiRequest(`/domains/${id}/scan`, "POST", token)
+      toast.success(`Scanning ${name}…`, {
+        description: "Results refresh in a few seconds.",
+      })
+      // Refresh after 3s to show the updated score.
       setTimeout(() => {
-        refetch();
-        setScanning(null);
-      }, 3000);
-    } catch {
-      setScanning(null);
+        refetch()
+        setScanning(null)
+      }, 3000)
+    } catch (err) {
+      toast.error("Failed to start scan", {
+        description: err instanceof Error ? err.message : undefined,
+      })
+      setScanning(null)
     }
   }
 
-  async function handleDelete(id: string, name: string) {
-    if (!confirm(`Remove ${name} from monitoring?`)) return;
-    setDeleting(id);
+  async function handleDelete(domain: Domain) {
+    setDeleting(domain.id)
     try {
-      const token = await getToken();
-      if (!token) {
-        throw new Error("No auth token found");
-      }
-      await apiRequest(`/domains/${id}`, "DELETE", token);
-      refetch();
-    } catch {
-      alert("Failed to remove domain");
+      const token = await getToken()
+      if (!token) throw new Error("No auth token found")
+      await apiRequest(`/domains/${domain.id}`, "DELETE", token)
+      toast.success(`${domain.domain} removed from monitoring`)
+      refetch()
+    } catch (err) {
+      toast.error("Failed to remove domain", {
+        description: err instanceof Error ? err.message : undefined,
+      })
     } finally {
-      setDeleting(null);
+      setDeleting(null)
     }
   }
+
+  const columns: DataTableColumn<Domain>[] = [
+    {
+      key: "domain",
+      header: "Domain",
+      cell: (d) => (
+        <div className="flex items-center gap-3">
+          <DomainAvatar domain={d.domain} />
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-foreground">
+              {d.domain}
+            </p>
+            <p className="truncate font-mono text-xs text-muted-foreground">
+              {d.detectedEsp || "Detecting ESP…"}
+            </p>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "health",
+      header: "Health",
+      className: "w-40",
+      cell: (d) => <HealthScore score={d.healthScore} size="sm" />,
+    },
+    { key: "spf", header: "SPF", cell: (d) => <AuthStatusBadge status={d.spfStatus} /> },
+    { key: "dkim", header: "DKIM", cell: (d) => <AuthStatusBadge status={d.dkimStatus} /> },
+    { key: "dmarc", header: "DMARC", cell: (d) => <AuthStatusBadge status={d.dmarcStatus} /> },
+    {
+      key: "lastChecked",
+      header: "Last Checked",
+      cell: (d) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {timeAgo(d.lastCheckedAt)}
+        </span>
+      ),
+    },
+    {
+      key: "added",
+      header: "Added",
+      cell: (d) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {new Date(d.createdAt).toLocaleDateString("en-US", DATE_FMT)}
+        </span>
+      ),
+    },
+    {
+      key: "actions",
+      header: "",
+      className: "w-px text-right",
+      cell: (d) => (
+        <div className="flex items-center justify-end gap-1.5">
+          <Button
+            variant="secondary"
+            size="xs"
+            onClick={() => handleScan(d.id, d.domain)}
+            disabled={scanning === d.id}
+          >
+            <RefreshCw className={scanning === d.id ? "animate-spin" : ""} />
+            {scanning === d.id ? "Scanning" : "Scan"}
+          </Button>
+          <ActionMenu
+            items={[
+              {
+                label: "Open site",
+                icon: ExternalLink,
+                onClick: () => window.open(`https://${d.domain}`, "_blank"),
+              },
+              {
+                label: "Remove domain",
+                icon: Trash2,
+                variant: "destructive",
+                disabled: deleting === d.id,
+                onClick: () => setPendingDelete(d),
+              },
+            ]}
+          />
+        </div>
+      ),
+    },
+  ]
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+    <div className="space-y-6">
       {showWizard && (
         <AddDomainWizard
           onClose={() => setShowWizard(false)}
           onDomainAdded={() => {
-            refetch();
-            setShowWizard(false);
+            refetch()
+            setShowWizard(false)
           }}
         />
       )}
 
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1
-            style={{
-              fontSize: 22,
-              fontWeight: 800,
-              color: "var(--text)",
-              letterSpacing: "-0.4px",
-            }}
-          >
-            Domains
-          </h1>
-          <p style={{ fontSize: 13, color: "var(--text-3)", marginTop: 4 }}>
-            {loading
-              ? "Loading..."
-              : `${domains.length} domain${domains.length !== 1 ? "s" : ""} being monitored`}
-          </p>
-        </div>
-        <button
-          onClick={() => setShowWizard(true)}
-          className="flex items-center gap-2"
-          style={{
-            height: 38,
-            padding: "0 16px",
-            background: "linear-gradient(135deg, #2563EB, #7C3AED)",
-            color: "white",
-            border: "none",
-            borderRadius: 10,
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: "pointer",
-            fontFamily: "var(--font-sans)",
-            boxShadow: "0 4px 12px rgba(37,99,235,0.3)",
-          }}
-        >
-          <Plus size={14} strokeWidth={2.5} /> Add Domain
-        </button>
-      </div>
+      <PageHeader
+        title="Domains"
+        description={
+          loading
+            ? "Loading…"
+            : `${domains.length} domain${domains.length !== 1 ? "s" : ""} being monitored`
+        }
+        action={
+          <Button onClick={() => setShowWizard(true)}>
+            <Plus strokeWidth={2.5} />
+            Add Domain
+          </Button>
+        }
+      />
 
-      {/* Summary cards */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
-          gap: 14,
-        }}
-      >
-        {[
-          {
-            label: "Healthy",
-            count: healthy,
-            color: "#10B981",
-            bg: "rgba(16,185,129,0.1)",
-            desc: "Score ≥ 80",
-          },
-          {
-            label: "Warning",
-            count: warning,
-            color: "#F59E0B",
-            bg: "rgba(245,158,11,0.1)",
-            desc: "Score 50–79",
-          },
-          {
-            label: "Critical",
-            count: critical,
-            color: "#EF4444",
-            bg: "rgba(239,68,68,0.1)",
-            desc: "Score < 50",
-          },
-        ].map((item) => (
-          <div
-            key={item.label}
-            style={{
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: 14,
-              padding: "18px 20px",
-              display: "flex",
-              alignItems: "center",
-              gap: 14,
-            }}
-          >
-            <div
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 12,
-                background: item.bg,
-                color: item.color,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 22,
-                fontWeight: 800,
-                fontFamily: "var(--font-mono)",
-              }}
-            >
-              {loading ? "—" : item.count}
-            </div>
-            <div>
-              <p
-                style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}
-              >
-                {item.label}
-              </p>
-              <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2 }}>
-                {item.desc}
-              </p>
-            </div>
-          </div>
-        ))}
+      {/* Summary */}
+      <div className="grid gap-4 sm:grid-cols-3">
+        <MetricCard
+          label="Healthy"
+          value={loading ? "—" : healthy}
+          icon={ShieldCheck}
+          hint="Score ≥ 80"
+        />
+        <MetricCard
+          label="Warning"
+          value={loading ? "—" : warning}
+          icon={AlertTriangle}
+          hint="Score 60–79"
+        />
+        <MetricCard
+          label="Critical"
+          value={loading ? "—" : critical}
+          icon={XCircle}
+          hint="Score < 60"
+        />
       </div>
 
       {/* Table */}
-      <div
-        style={{
-          background: "var(--surface)",
-          border: "1px solid var(--border)",
-          borderRadius: 16,
-          overflow: "hidden",
-        }}
-      >
-        {/* Search */}
-        <div
-          style={{
-            padding: "14px 22px",
-            borderBottom: "1px solid var(--border)",
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-          }}
-        >
-          <div
-            className="flex items-center gap-2"
-            style={{
-              background: "var(--surface-2)",
-              border: "1px solid var(--border)",
-              borderRadius: 9,
-              padding: "0 12px",
-              height: 36,
-              maxWidth: 300,
-              flex: 1,
-            }}
-          >
-            <Search size={13} color="var(--text-3)" />
-            <input
+      <Card className="gap-0 overflow-hidden p-0">
+        <div className="flex items-center gap-3 border-b border-border p-4 sm:px-5">
+          <div className="w-full max-w-xs">
+            <SearchInput
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search domains or ESP..."
-              style={{
-                background: "none",
-                border: "none",
-                outline: "none",
-                fontSize: 13,
-                color: "var(--text)",
-                fontFamily: "var(--font-sans)",
-                width: "100%",
-              }}
+              onValueChange={setSearch}
+              label="Search domains or ESP"
+              placeholder="Search domains or ESP…"
             />
           </div>
-          <button
+          <Button
+            variant="outline"
+            size="icon-sm"
             onClick={refetch}
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 9,
-              border: "1px solid var(--border)",
-              background: "var(--surface-2)",
-              cursor: "pointer",
-              color: "var(--text-3)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
+            aria-label="Refresh domains"
           >
-            <RefreshCw size={14} className={loading ? "spin" : ""} />
-          </button>
+            <RefreshCw className={loading ? "animate-spin" : ""} />
+          </Button>
         </div>
 
-        {/* Loading / Error / Empty / Table */}
-        {loading ? (
-          <div style={{ padding: 60, textAlign: "center" }}>
-            <RefreshCw
-              size={24}
-              color="var(--text-3)"
-              className="spin"
-              style={{ margin: "0 auto" }}
+        <div className="p-4 sm:p-5">
+          {loading ? (
+            <LoadingSkeleton variant="table" count={5} />
+          ) : error ? (
+            <EmptyState
+              icon={Globe}
+              title="Failed to load domains"
+              description={error}
+              action={
+                <Button variant="outline" size="sm" onClick={refetch}>
+                  <RefreshCw />
+                  Try again
+                </Button>
+              }
             />
-            <p style={{ fontSize: 13, color: "var(--text-3)", marginTop: 12 }}>
-              Loading domains...
-            </p>
-          </div>
-        ) : error ? (
-          <div style={{ padding: 40, textAlign: "center" }}>
-            <p style={{ fontSize: 14, color: "#EF4444", fontWeight: 600 }}>
-              Failed to load
-            </p>
-            <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 4 }}>
-              {error}
-            </p>
-            <button
-              onClick={refetch}
-              style={{
-                marginTop: 12,
-                padding: "8px 16px",
-                background: "#2563EB",
-                color: "white",
-                border: "none",
-                borderRadius: 9,
-                cursor: "pointer",
-                fontSize: 13,
-                fontWeight: 600,
-              }}
-            >
-              Retry
-            </button>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div style={{ padding: 60, textAlign: "center" }}>
-            <p style={{ fontSize: 32, marginBottom: 12 }}>🌐</p>
-            <p style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
-              {domains.length === 0 ? "No domains yet" : "No results"}
-            </p>
-            <p style={{ fontSize: 13, color: "var(--text-3)", marginTop: 6 }}>
-              {domains.length === 0
-                ? "Add your first domain to start monitoring"
-                : "Try a different search"}
-            </p>
-            {domains.length === 0 && (
-              <button
-                onClick={() => setShowWizard(true)}
-                style={{
-                  marginTop: 20,
-                  padding: "10px 20px",
-                  background: "linear-gradient(135deg, #2563EB, #7C3AED)",
-                  color: "white",
-                  border: "none",
-                  borderRadius: 10,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                + Add Your First Domain
-              </button>
-            )}
-          </div>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr
-                  style={{
-                    borderBottom: "1px solid var(--border)",
-                    background: "var(--surface-2)",
-                  }}
-                >
-                  {[
-                    "Domain",
-                    "Health",
-                    "SPF",
-                    "DKIM",
-                    "DMARC",
-                    "Last Checked",
-                    "Added",
-                    "",
-                  ].map((h) => (
-                    <th
-                      key={h}
-                      style={{
-                        textAlign: "left",
-                        padding: "10px 22px",
-                        fontSize: 11,
-                        fontWeight: 700,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.07em",
-                        color: "var(--text-3)",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((d) => (
-                  <tr
-                    key={d.id}
-                    style={{
-                      borderBottom: "1px solid var(--border)",
-                      transition: "background 0.12s",
-                    }}
-                    onMouseEnter={(e) => {
-                      (
-                        e.currentTarget as HTMLTableRowElement
-                      ).style.background = "var(--surface-2)";
-                    }}
-                    onMouseLeave={(e) => {
-                      (
-                        e.currentTarget as HTMLTableRowElement
-                      ).style.background = "transparent";
-                    }}
-                  >
-                    <td style={{ padding: "14px 22px" }}>
-                      <div className="flex items-center gap-3">
-                        <div
-                          style={{
-                            width: 34,
-                            height: 34,
-                            borderRadius: 9,
-                            background: "var(--surface-2)",
-                            border: "1px solid var(--border)",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontSize: 11,
-                            fontWeight: 700,
-                            color: "var(--text-3)",
-                            fontFamily: "var(--font-mono)",
-                          }}
-                        >
-                          {d.domain.substring(0, 2).toUpperCase()}
-                        </div>
-                        <div>
-                          <p
-                            style={{
-                              fontWeight: 600,
-                              fontSize: 13.5,
-                              color: "var(--text)",
-                            }}
-                          >
-                            {d.domain}
-                          </p>
-                          <p
-                            style={{
-                              fontSize: 11.5,
-                              color: "var(--text-3)",
-                              fontFamily: "var(--font-mono)",
-                              marginTop: 1,
-                            }}
-                          >
-                            {d.detectedEsp || "Detecting ESP..."}
-                          </p>
-                        </div>
-                      </div>
-                    </td>
-                    <td style={{ padding: "14px 22px" }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: 34,
-                            height: 34,
-                            borderRadius: "50%",
-                            background: `conic-gradient(${scoreColor(d.healthScore)} ${d.healthScore * 3.6}deg, var(--border) 0deg)`,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: 24,
-                              height: 24,
-                              borderRadius: "50%",
-                              background: "var(--surface)",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              fontSize: 8,
-                              fontWeight: 800,
-                              color: scoreColor(d.healthScore),
-                              fontFamily: "var(--font-mono)",
-                            }}
-                          >
-                            {d.healthScore}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td style={{ padding: "14px 22px" }}>
-                      <Pill status={d.spfStatus} />
-                    </td>
-                    <td style={{ padding: "14px 22px" }}>
-                      <Pill status={d.dkimStatus} />
-                    </td>
-                    <td style={{ padding: "14px 22px" }}>
-                      <Pill status={d.dmarcStatus} />
-                    </td>
-                    <td style={{ padding: "14px 22px" }}>
-                      <span
-                        style={{
-                          fontSize: 12.5,
-                          color: "var(--text-3)",
-                          fontFamily: "var(--font-mono)",
-                        }}
-                      >
-                        {timeAgo(d.lastCheckedAt)}
-                      </span>
-                    </td>
-                    <td style={{ padding: "14px 22px" }}>
-                      <span
-                        style={{
-                          fontSize: 12,
-                          color: "var(--text-3)",
-                          fontFamily: "var(--font-mono)",
-                        }}
-                      >
-                        {new Date(d.createdAt).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })}
-                      </span>
-                    </td>
-                    <td style={{ padding: "14px 22px" }}>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => handleScan(d.id)}
-                          className="flex items-center gap-1"
-                          style={{
-                            padding: "5px 10px",
-                            borderRadius: 8,
-                            fontSize: 12,
-                            fontWeight: 600,
-                            cursor: "pointer",
-                            border: "none",
-                            fontFamily: "var(--font-sans)",
-                            background: "rgba(37,99,235,0.1)",
-                            color: "#2563EB",
-                          }}
-                        >
-                          <RefreshCw
-                            size={11}
-                            className={scanning === d.id ? "spin" : ""}
-                          />
-                          {scanning === d.id ? "Scanning" : "Scan"}
-                        </button>
-                        <button
-                          onClick={() =>
-                            window.open(`https://${d.domain}`, "_blank")
-                          }
-                          style={{
-                            width: 28,
-                            height: 28,
-                            borderRadius: 7,
-                            border: "1px solid var(--border)",
-                            background: "var(--surface)",
-                            color: "var(--text-3)",
-                            cursor: "pointer",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                          }}
-                        >
-                          <ExternalLink size={12} />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(d.id, d.domain)}
-                          disabled={deleting === d.id}
-                          style={{
-                            width: 28,
-                            height: 28,
-                            borderRadius: 7,
-                            border: "1px solid var(--border)",
-                            background: "var(--surface)",
-                            color: "var(--text-3)",
-                            cursor: "pointer",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                          }}
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+          ) : domains.length === 0 ? (
+            <EmptyState
+              icon={Globe}
+              title="No domains yet"
+              description="Add your first domain to start monitoring SPF, DKIM, and DMARC compliance."
+              action={
+                <Button onClick={() => setShowWizard(true)}>
+                  <Plus strokeWidth={2.5} />
+                  Add your first domain
+                </Button>
+              }
+            />
+          ) : filtered.length === 0 ? (
+            <EmptyState
+              icon={SearchIcon}
+              size="sm"
+              title="No results"
+              description="Try a different search term."
+            />
+          ) : (
+            <DataTable columns={columns} data={filtered} getRowKey={(d) => d.id} />
+          )}
+        </div>
+      </Card>
+
+      <ConfirmationDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null)
+        }}
+        title="Remove domain?"
+        description={
+          pendingDelete
+            ? `${pendingDelete.domain} will be removed from monitoring. This can't be undone.`
+            : ""
+        }
+        actionLabel="Remove"
+        variant="destructive"
+        onConfirm={() => {
+          if (pendingDelete) handleDelete(pendingDelete)
+        }}
+      />
     </div>
-  );
+  )
 }

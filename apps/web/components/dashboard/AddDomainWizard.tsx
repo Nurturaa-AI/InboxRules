@@ -1,148 +1,161 @@
-"use client";
+"use client"
 
-import { useState } from "react";
-import { useAuth } from "@clerk/nextjs";
+import { useState } from "react"
+import { useAuth } from "@clerk/nextjs"
+import { toast } from "sonner"
 import {
   CheckCircle,
-  XCircle,
-  AlertCircle,
   RefreshCw,
-  X,
   ArrowRight,
   Copy,
   Check,
-} from "lucide-react";
+  FileText,
+  KeyRound,
+  ShieldCheck,
+  Sparkles,
+  Bell,
+  Users,
+  Mail,
+  PartyPopper,
+} from "lucide-react"
+
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
+import { StatusBadge, statusFromString } from "@/components/shared/StatusBadge"
+import { cn } from "@/lib/utils"
 
 interface Props {
-  onClose: () => void;
-  onDomainAdded: (domain: Domain) => void;
+  onClose: () => void
+  onDomainAdded: (domain: Domain) => void
 }
 
 interface DKIMRecord {
-  selector: string;
-  keyBits: number;
-  valid?: boolean;
+  selector: string
+  keyBits: number
+  valid?: boolean
 }
 
 interface DNSResult {
-  spf?: { lookupCount?: number; result?: string; record?: string };
-  dkim?: DKIMRecord[];
-  dmarc?: { policy?: string; result?: string; record?: string };
-  softFailures?: string[];
-  overallScore?: number;
+  spf?: { lookupCount?: number; result?: string; record?: string }
+  dkim?: DKIMRecord[]
+  dmarc?: { policy?: string; result?: string; record?: string }
+  softFailures?: string[]
+  overallScore?: number
 }
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4500";
 
 interface Domain {
-  id: string;
-  domain: string;
-  createdAt?: string;
-  [key: string]: unknown;
+  id: string
+  domain: string
+  createdAt?: string
+  [key: string]: unknown
 }
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4500"
+
+const STEP_TITLES: Record<number, string> = {
+  1: "Add New Domain",
+  2: "Running Compliance Scan",
+  3: "Compliance Report",
+  4: "All Set!",
+}
+
+/** Score ring — same thresholds as HealthScore (≥80 / ≥60 / <60). */
 function ScoreRing({ score }: { score: number }) {
-  const color = score >= 80 ? "#10B981" : score >= 60 ? "#F59E0B" : "#EF4444";
-  const circumference = 2 * Math.PI * 28;
-  const progress = (score / 100) * circumference;
+  const tone = score >= 80 ? "success" : score >= 60 ? "warning" : "danger"
+  const circumference = 2 * Math.PI * 28
+  const progress = (score / 100) * circumference
+  const toneText =
+    tone === "success"
+      ? "text-success"
+      : tone === "warning"
+        ? "text-warning"
+        : "text-danger"
+
   return (
-    <div style={{ position: "relative", width: 80, height: 80 }}>
-      <svg width="80" height="80" style={{ transform: "rotate(-90deg)" }}>
+    <div className="relative size-20 shrink-0">
+      <svg
+        width="80"
+        height="80"
+        className="-rotate-90"
+        role="img"
+        aria-label={`Health score ${score} out of 100`}
+      >
         <circle
           cx="40"
           cy="40"
           r="28"
           fill="none"
-          stroke="#E2E8F0"
+          stroke="currentColor"
           strokeWidth="6"
+          className="text-muted"
         />
         <circle
           cx="40"
           cy="40"
           r="28"
           fill="none"
-          stroke={color}
+          stroke="currentColor"
           strokeWidth="6"
           strokeDasharray={`${progress} ${circumference}`}
           strokeLinecap="round"
-          style={{ transition: "stroke-dasharray 0.8s ease" }}
+          className={cn("transition-all duration-700", toneText)}
         />
       </svg>
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <span
-          style={{
-            fontSize: 20,
-            fontWeight: 800,
-            fontFamily: "monospace",
-            color,
-          }}
-        >
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className={cn("font-mono text-xl font-bold", toneText)}>
           {score}
         </span>
-        <span style={{ fontSize: 9, color: "#94A3B8", fontWeight: 600 }}>
+        <span className="text-[9px] font-semibold text-muted-foreground">
           /100
         </span>
       </div>
     </div>
-  );
+  )
 }
 
-function StatusIcon({ status }: { status: string }) {
-  if (status === "pass") return <CheckCircle size={16} color="#10B981" />;
-  if (status === "fail" || status === "none" || status === "missing")
-    return <XCircle size={16} color="#EF4444" />;
-  return <AlertCircle size={16} color="#F59E0B" />;
-}
-
+/** Progress rail of step dots. */
 function StepDots({ step }: { step: number }) {
   return (
-    <div style={{ display: "flex", gap: 6 }}>
+    <div className="flex gap-1.5" aria-hidden="true">
       {[1, 2, 3, 4].map((s) => (
         <div
           key={s}
-          style={{
-            height: 4,
-            width: s <= step ? 28 : 16,
-            borderRadius: 999,
-            background:
-              s <= step
-                ? "linear-gradient(135deg, #2563EB, #7C3AED)"
-                : "#E2E8F0",
-            transition: "all 0.3s",
-          }}
+          className={cn(
+            "h-1 rounded-full transition-all duration-300",
+            s <= step ? "w-7 bg-primary" : "w-4 bg-muted"
+          )}
         />
       ))}
     </div>
-  );
+  )
 }
 
 export default function AddDomainWizard({ onClose, onDomainAdded }: Props) {
-  const { getToken } = useAuth();
+  const { getToken } = useAuth()
 
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
-  const [domain, setDomain] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [addedDomain, setAddedDomain] = useState<Domain | null>(null);
-  const [dnsResult, setDnsResult] = useState<DNSResult | null>(null);
-  const [aiDiagnosis, setAiDiagnosis] = useState("");
-  const [scanComplete, setScanComplete] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1)
+  const [domain, setDomain] = useState("")
+  const [error, setError] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [addedDomain, setAddedDomain] = useState<Domain | null>(null)
+  const [dnsResult, setDnsResult] = useState<DNSResult | null>(null)
+  const [aiDiagnosis, setAiDiagnosis] = useState("")
+  const [scanComplete, setScanComplete] = useState(false)
+  const [copied, setCopied] = useState(false)
   const [progress, setProgress] = useState({
     spfDone: false,
     dkimDone: false,
     dmarcDone: false,
     aiDone: false,
-  });
+  })
 
   // Clean the domain input
   function cleanDomain(input: string) {
@@ -151,24 +164,24 @@ export default function AddDomainWizard({ onClose, onDomainAdded }: Props) {
       .toLowerCase()
       .replace(/^https?:\/\//, "")
       .replace(/\/.*$/, "")
-      .replace(/\s/g, "");
+      .replace(/\s/g, "")
   }
 
   // Step 1 → 2: Add domain then stream analysis
   async function handleAddDomain() {
-    const cleaned = cleanDomain(domain);
+    const cleaned = cleanDomain(domain)
     if (!cleaned || !cleaned.includes(".")) {
-      setError("Please enter a valid domain e.g. acme.com");
-      return;
+      setError("Please enter a valid domain e.g. acme.com")
+      return
     }
 
-    setError("");
-    setLoading(true);
+    setError("")
+    setLoading(true)
 
     try {
-      const token = await getToken();
+      const token = await getToken()
       if (!token) {
-        throw new Error("Authentication token not available");
+        throw new Error("Authentication token not available")
       }
 
       // 1. Add domain to database
@@ -179,24 +192,24 @@ export default function AddDomainWizard({ onClose, onDomainAdded }: Props) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ domain: cleaned }),
-      });
+      })
 
-      const addData = await addResponse.json();
+      const addData = await addResponse.json()
 
       if (!addResponse.ok) {
-        throw new Error(addData.error?.message || "Failed to add domain");
+        throw new Error(addData.error?.message || "Failed to add domain")
       }
 
-      setAddedDomain(addData.data);
-      setStep(2);
-      setLoading(false);
+      setAddedDomain(addData.data)
+      setStep(2)
+      setLoading(false)
 
       // 2. Start streaming DNS analysis
-      startAnalysis(cleaned, token);
+      startAnalysis(cleaned, token)
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err ?? "");
-      setError(msg || "Failed to add domain. Please try again.");
-      setLoading(false);
+      const msg = err instanceof Error ? err.message : String(err ?? "")
+      setError(msg || "Failed to add domain. Please try again.")
+      setLoading(false)
     }
   }
 
@@ -211,73 +224,73 @@ export default function AddDomainWizard({ onClose, onDomainAdded }: Props) {
           Accept: "text/event-stream",
         },
         body: JSON.stringify({ domain: domainName }),
-      });
+      })
 
       if (!response.ok || !response.body) {
         // Even if AI fails, mark scan complete so user can proceed
-        setScanComplete(true);
+        setScanComplete(true)
         setProgress({
           spfDone: true,
           dkimDone: true,
           dmarcDone: true,
           aiDone: true,
-        });
-        setTimeout(() => setStep(3), 800);
-        return;
+        })
+        setTimeout(() => setStep(3), 800)
+        return
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let aiText = "";
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+      let aiText = ""
 
       while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        const { done, value } = await reader.read()
+        if (done) break
 
-        buffer += decoder.decode(value, { stream: true });
-        const messages = buffer.split("\n\n");
-        buffer = messages.pop() || "";
+        buffer += decoder.decode(value, { stream: true })
+        const messages = buffer.split("\n\n")
+        buffer = messages.pop() || ""
 
         for (const message of messages) {
-          if (!message.trim()) continue;
+          if (!message.trim()) continue
 
-          const lines = message.split("\n");
-          let event = "message";
-          let data = "";
+          const lines = message.split("\n")
+          let event = "message"
+          let data = ""
 
           for (const line of lines) {
-            if (line.startsWith("event: ")) event = line.substring(7).trim();
-            if (line.startsWith("data: ")) data = line.substring(6).trim();
+            if (line.startsWith("event: ")) event = line.substring(7).trim()
+            if (line.startsWith("data: ")) data = line.substring(6).trim()
           }
 
-          if (!data) continue;
+          if (!data) continue
 
           try {
-            const parsed = JSON.parse(data);
+            const parsed = JSON.parse(data)
 
             if (event === "dns_result") {
-              setDnsResult(parsed);
+              setDnsResult(parsed)
               setProgress((p) => ({
                 ...p,
                 spfDone: true,
                 dkimDone: true,
                 dmarcDone: true,
-              }));
+              }))
             }
             if (event === "ai_token") {
-              aiText += parsed.token || "";
-              setAiDiagnosis(aiText);
+              aiText += parsed.token || ""
+              setAiDiagnosis(aiText)
             }
             if (event === "done") {
-              setProgress((p) => ({ ...p, aiDone: true }));
-              setScanComplete(true);
-              setTimeout(() => setStep(3), 600);
+              setProgress((p) => ({ ...p, aiDone: true }))
+              setScanComplete(true)
+              setTimeout(() => setStep(3), 600)
             }
             if (event === "error") {
-              setScanComplete(true);
-              setProgress((p) => ({ ...p, aiDone: true }));
-              setTimeout(() => setStep(3), 600);
+              setScanComplete(true)
+              setProgress((p) => ({ ...p, aiDone: true }))
+              setTimeout(() => setStep(3), 600)
             }
           } catch {
             /* ignore parse errors */
@@ -286,465 +299,253 @@ export default function AddDomainWizard({ onClose, onDomainAdded }: Props) {
       }
     } catch {
       // Network error — still advance
-      setScanComplete(true);
+      setScanComplete(true)
       setProgress({
         spfDone: true,
         dkimDone: true,
         dmarcDone: true,
         aiDone: true,
-      });
-      setTimeout(() => setStep(3), 800);
+      })
+      setTimeout(() => setStep(3), 800)
     }
   }
 
   function copyHeaders() {
-    if (!addedDomain) return;
+    if (!addedDomain) return
     const text =
       `List-Unsubscribe: <https://unsub.inboxrules.io/${addedDomain.id}>, ` +
-      `<mailto:unsubscribe@${domain}?subject=unsubscribe>\n` +
-      `List-Unsubscribe-Post: List-Unsubscribe=One-Click`;
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+      `<mailto:unsubscribe@${cleanDomain(domain)}?subject=unsubscribe>\n` +
+      `List-Unsubscribe-Post: List-Unsubscribe=One-Click`
+    navigator.clipboard.writeText(text)
+    setCopied(true)
+    toast.success("Headers copied to clipboard")
+    setTimeout(() => setCopied(false), 2000)
   }
 
-  const score = dnsResult?.overallScore ?? 0;
-  const scoreColor =
-    score >= 80 ? "#10B981" : score >= 60 ? "#F59E0B" : "#EF4444";
+  const score = dnsResult?.overallScore ?? 0
+  const scoreText =
+    score >= 80
+      ? "text-success"
+      : score >= 60
+        ? "text-warning"
+        : "text-danger"
 
-  // ─── Shared styles ───
-  const card: React.CSSProperties = {
-    background: "#FFFFFF",
-    border: "1px solid #E2E8F0",
-    borderRadius: 12,
-    padding: 16,
-  };
-
-  const btn = (primary?: boolean): React.CSSProperties => ({
-    height: 40,
-    padding: "0 20px",
-    borderRadius: 10,
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: "pointer",
-    fontFamily: "inherit",
-    border: primary ? "none" : "1px solid #E2E8F0",
-    background: primary
-      ? "linear-gradient(135deg, #2563EB, #7C3AED)"
-      : "#F8FAFC",
-    color: primary ? "white" : "#475569",
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-  });
+  function handleOpenChange(open: boolean) {
+    if (!open) onClose()
+  }
 
   return (
-    // Backdrop
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.55)",
-        backdropFilter: "blur(6px)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-        padding: 24,
-      }}
-    >
-      {/* Modal — solid white background, no transparency */}
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: "#FFFFFF",
-          borderRadius: 20,
-          width: "100%",
-          maxWidth: 560,
-          maxHeight: "90vh",
-          display: "flex",
-          flexDirection: "column",
-          boxShadow: "0 25px 60px rgba(0,0,0,0.25)",
-          overflow: "hidden",
-        }}
+    <Dialog open onOpenChange={handleOpenChange}>
+      <DialogContent
+        className="flex max-h-[90vh] max-w-xl flex-col gap-0 overflow-hidden p-0"
+        showCloseButton
       >
         {/* Header */}
-        <div
-          style={{
-            padding: "20px 24px",
-            borderBottom: "1px solid #E2E8F0",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            background: "#FFFFFF",
-          }}
-        >
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <h2
-              style={{
-                fontSize: 17,
-                fontWeight: 800,
-                color: "#0F172A",
-                letterSpacing: "-0.3px",
-                margin: 0,
-              }}
-            >
-              {step === 1 && "Add New Domain"}
-              {step === 2 && "Running Compliance Scan"}
-              {step === 3 && "Compliance Report"}
-              {step === 4 && "All Set!"}
-            </h2>
-            <StepDots step={step} />
-          </div>
-          <button
-            onClick={onClose}
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 8,
-              border: "1px solid #E2E8F0",
-              background: "#F8FAFC",
-              cursor: "pointer",
-              color: "#94A3B8",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <X size={14} />
-          </button>
-        </div>
+        <DialogHeader className="gap-2 border-b border-border p-5 text-left">
+          <DialogTitle className="text-base">{STEP_TITLES[step]}</DialogTitle>
+          <StepDots step={step} />
+        </DialogHeader>
 
         {/* Body */}
-        <div
-          style={{
-            flex: 1,
-            overflowY: "auto",
-            padding: 24,
-            background: "#FFFFFF",
-          }}
-        >
+        <div className="flex-1 overflow-y-auto p-5">
           {/* ── STEP 1 ── */}
           {step === 1 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-              <p
-                style={{
-                  fontSize: 14,
-                  color: "#475569",
-                  lineHeight: 1.6,
-                  margin: 0,
-                }}
-              >
-                Enter your sending domain and we will run a full SPF, DKIM, and
-                DMARC compliance check instantly.
+            <div className="flex flex-col gap-5">
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                Enter your sending domain and we&apos;ll run a full SPF, DKIM,
+                and DMARC compliance check instantly.
               </p>
 
-              <div>
+              <div className="flex flex-col gap-2">
                 <label
-                  style={{
-                    display: "block",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: "#374151",
-                    marginBottom: 8,
-                  }}
+                  htmlFor="wizard-domain"
+                  className="text-sm font-medium text-foreground"
                 >
                   Domain Name
                 </label>
-                <input
+                <Input
+                  id="wizard-domain"
                   type="text"
                   value={domain}
                   onChange={(e) => {
-                    setDomain(e.target.value);
-                    setError("");
+                    setDomain(e.target.value)
+                    setError("")
                   }}
                   onKeyDown={(e) => e.key === "Enter" && handleAddDomain()}
                   placeholder="e.g. acme.com"
                   autoFocus
-                  style={{
-                    width: "100%",
-                    height: 46,
-                    padding: "0 16px",
-                    background: error ? "#FFF5F5" : "#F8FAFC",
-                    border: `1.5px solid ${error ? "#EF4444" : "#E2E8F0"}`,
-                    borderRadius: 11,
-                    fontSize: 15,
-                    color: "#0F172A",
-                    fontFamily: "inherit",
-                    outline: "none",
-                    transition: "border-color 0.15s",
-                  }}
-                  onFocus={(e) => {
-                    if (!error) e.target.style.borderColor = "#2563EB";
-                  }}
-                  onBlur={(e) => {
-                    if (!error) e.target.style.borderColor = "#E2E8F0";
-                  }}
+                  aria-invalid={!!error}
+                  aria-describedby={error ? "wizard-domain-error" : undefined}
+                  className="h-11 text-base"
                 />
                 {error && (
-                  <p style={{ fontSize: 12.5, color: "#EF4444", marginTop: 6 }}>
+                  <p
+                    id="wizard-domain-error"
+                    className="text-xs text-danger"
+                    role="alert"
+                  >
                     {error}
                   </p>
                 )}
               </div>
 
               {/* What we check */}
-              <div style={{ ...card, background: "#F8FAFC" }}>
-                <p
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: "#94A3B8",
-                    marginBottom: 12,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                  }}
-                >
+              <Card size="sm" className="gap-0 bg-muted/40 p-4">
+                <p className="mb-3 text-[11px] font-bold tracking-wider text-muted-foreground uppercase">
                   What we check
                 </p>
-                {[
-                  {
-                    icon: "📋",
-                    label: "SPF Record",
-                    desc: "Validates lookup count and alignment",
-                  },
-                  {
-                    icon: "🔑",
-                    label: "DKIM Selectors",
-                    desc: "Checks 16 common selectors automatically",
-                  },
-                  {
-                    icon: "🛡️",
-                    label: "DMARC Policy",
-                    desc: "Validates policy and reporting setup",
-                  },
-                  {
-                    icon: "🤖",
-                    label: "AI Diagnosis",
-                    desc: "Plain-English explanation with fix steps",
-                  },
-                ].map((item) => (
-                  <div
-                    key={item.label}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 12,
-                      marginBottom: 10,
-                    }}
-                  >
-                    <span style={{ fontSize: 18, flexShrink: 0 }}>
-                      {item.icon}
-                    </span>
-                    <div>
-                      <span
-                        style={{
-                          fontSize: 13,
-                          fontWeight: 600,
-                          color: "#374151",
-                        }}
-                      >
-                        {item.label}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 12.5,
-                          color: "#94A3B8",
-                          marginLeft: 6,
-                        }}
-                      >
-                        — {item.desc}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                <ul className="flex flex-col gap-2.5">
+                  {[
+                    {
+                      icon: FileText,
+                      label: "SPF Record",
+                      desc: "Validates lookup count and alignment",
+                    },
+                    {
+                      icon: KeyRound,
+                      label: "DKIM Selectors",
+                      desc: "Checks 16 common selectors automatically",
+                    },
+                    {
+                      icon: ShieldCheck,
+                      label: "DMARC Policy",
+                      desc: "Validates policy and reporting setup",
+                    },
+                    {
+                      icon: Sparkles,
+                      label: "AI Diagnosis",
+                      desc: "Plain-English explanation with fix steps",
+                    },
+                  ].map((item) => (
+                    <li key={item.label} className="flex items-center gap-3">
+                      <item.icon className="size-4 shrink-0 text-muted-foreground" />
+                      <div className="text-sm">
+                        <span className="font-medium text-foreground">
+                          {item.label}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {" "}
+                          — {item.desc}
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
             </div>
           )}
 
           {/* ── STEP 2 — Scanning ── */}
           {step === 2 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div className="flex flex-col gap-4">
               {/* Domain badge */}
-              <div
-                style={{
-                  padding: "12px 16px",
-                  background: "#EFF6FF",
-                  border: "1px solid #BFDBFE",
-                  borderRadius: 10,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                }}
-              >
-                <div
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: "50%",
-                    background: "#2563EB",
-                    animation: "pulse 1s ease-in-out infinite",
-                  }}
-                />
+              <div className="flex items-center gap-2.5 rounded-lg border border-info/30 bg-info-subtle px-4 py-3">
                 <span
-                  style={{
-                    fontSize: 13.5,
-                    fontWeight: 600,
-                    color: "#1E40AF",
-                    fontFamily: "monospace",
-                  }}
-                >
+                  className="size-2 animate-pulse rounded-full bg-info"
+                  aria-hidden="true"
+                />
+                <span className="font-mono text-sm font-semibold text-info-foreground">
                   {cleanDomain(domain)}
                 </span>
-                <span style={{ fontSize: 12, color: "#3B82F6" }}>
+                <span className="text-xs text-info-foreground/80">
                   — scanning in progress
                 </span>
               </div>
 
               {/* Check rows */}
-              <div style={card}>
-                {[
-                  {
-                    done: progress.spfDone,
-                    label: "SPF Record",
-                    status: dnsResult?.spf?.result,
-                    detail: `${dnsResult?.spf?.lookupCount || 0}/10 lookups`,
-                  },
-                  {
-                    done: progress.dkimDone,
-                    label: "DKIM",
-                    status: dnsResult?.dkim?.some((d: DKIMRecord) => d.valid)
-                      ? "pass"
-                      : "fail",
-                    detail: `${dnsResult?.dkim?.length || 0} selector(s) found`,
-                  },
-                  {
-                    done: progress.dmarcDone,
-                    label: "DMARC Policy",
-                    status: dnsResult?.dmarc?.result,
-                    detail: `p=${dnsResult?.dmarc?.policy || "?"}`,
-                  },
-                  {
-                    done: progress.aiDone,
-                    label: "AI Analysis",
-                    status: "info",
-                    detail: "Generating fix instructions",
-                  },
-                ].map((row, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 12,
-                      padding: "12px 0",
-                      borderBottom: i < 3 ? "1px solid #F1F5F9" : "none",
-                    }}
-                  >
-                    {row.done ? (
-                      <StatusIcon status={row.status || "unknown"} />
-                    ) : (
-                      <div
-                        style={{
-                          width: 16,
-                          height: 16,
-                          borderRadius: "50%",
-                          border: "2px solid #E2E8F0",
-                          borderTopColor: "#2563EB",
-                          animation: "spin 1s linear infinite",
-                          flexShrink: 0,
-                        }}
-                      />
-                    )}
-                    <div style={{ flex: 1 }}>
-                      <p
-                        style={{
-                          fontSize: 13.5,
-                          fontWeight: 600,
-                          color: "#0F172A",
-                        }}
-                      >
-                        {row.label}
-                      </p>
-                      {row.done && row.detail && (
-                        <p
-                          style={{
-                            fontSize: 11.5,
-                            color: "#94A3B8",
-                            fontFamily: "monospace",
-                            marginTop: 2,
-                          }}
-                        >
-                          {row.detail}
-                        </p>
+              <Card size="sm" className="gap-0 p-4">
+                <ul>
+                  {[
+                    {
+                      done: progress.spfDone,
+                      label: "SPF Record",
+                      status: dnsResult?.spf?.result,
+                      detail: `${dnsResult?.spf?.lookupCount || 0}/10 lookups`,
+                    },
+                    {
+                      done: progress.dkimDone,
+                      label: "DKIM",
+                      status: dnsResult?.dkim?.some((d: DKIMRecord) => d.valid)
+                        ? "pass"
+                        : "fail",
+                      detail: `${dnsResult?.dkim?.length || 0} selector(s) found`,
+                    },
+                    {
+                      done: progress.dmarcDone,
+                      label: "DMARC Policy",
+                      status: dnsResult?.dmarc?.result,
+                      detail: `p=${dnsResult?.dmarc?.policy || "?"}`,
+                    },
+                    {
+                      done: progress.aiDone,
+                      label: "AI Analysis",
+                      status: "info",
+                      detail: "Generating fix instructions",
+                    },
+                  ].map((row, i) => (
+                    <li
+                      key={row.label}
+                      className={cn(
+                        "flex items-center gap-3 py-3",
+                        i < 3 && "border-b border-border"
                       )}
-                    </div>
-                    {row.done ? (
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          padding: "2px 8px",
-                          borderRadius: 999,
-                          background:
-                            row.status === "pass"
-                              ? "#DCFCE7"
-                              : row.status === "fail"
-                                ? "#FEE2E2"
-                                : "#FEF3C7",
-                          color:
-                            row.status === "pass"
-                              ? "#16A34A"
-                              : row.status === "fail"
-                                ? "#DC2626"
-                                : "#D97706",
-                        }}
-                      >
-                        {row.status?.toUpperCase() || "DONE"}
-                      </span>
-                    ) : (
-                      <span style={{ fontSize: 12, color: "#94A3B8" }}>
-                        Checking...
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
+                    >
+                      {row.done ? (
+                        <StatusBadge
+                          status={statusFromString(row.status || "unknown")}
+                          showIcon
+                          label=""
+                          className="size-5 justify-center rounded-full p-0 [&>svg]:size-4"
+                          aria-label={`${row.label} ${row.status || "done"}`}
+                        />
+                      ) : (
+                        <RefreshCw
+                          className="size-4 shrink-0 animate-spin text-primary"
+                          aria-hidden="true"
+                        />
+                      )}
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-foreground">
+                          {row.label}
+                        </p>
+                        {row.done && row.detail && (
+                          <p className="mt-0.5 font-mono text-xs text-muted-foreground">
+                            {row.detail}
+                          </p>
+                        )}
+                      </div>
+                      {row.done ? (
+                        <StatusBadge
+                          status={statusFromString(row.status || "unknown")}
+                          showIcon={false}
+                          label={(row.status || "done").toUpperCase()}
+                        />
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          Checking…
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </Card>
 
               {/* Soft failures */}
               {(dnsResult?.softFailures?.length ?? 0) > 0 && (
-                <div
-                  style={{
-                    background: "#FFFBEB",
-                    border: "1px solid #FDE68A",
-                    borderRadius: 10,
-                    padding: 14,
-                  }}
-                >
-                  <p
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 700,
-                      color: "#D97706",
-                      marginBottom: 8,
-                    }}
-                  >
-                    ⚠️ Soft Failures Detected
+                <div className="rounded-lg border border-warning/30 bg-warning-subtle p-3.5">
+                  <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-warning-foreground">
+                    Soft failures detected
                   </p>
-                  {dnsResult?.softFailures?.map((w: string, i: number) => (
-                    <p
-                      key={i}
-                      style={{
-                        fontSize: 12.5,
-                        color: "#92400E",
-                        marginBottom: 4,
-                        lineHeight: 1.5,
-                      }}
-                    >
-                      · {w}
-                    </p>
-                  ))}
+                  <ul className="flex flex-col gap-1">
+                    {dnsResult?.softFailures?.map((w: string, i: number) => (
+                      <li
+                        key={i}
+                        className="text-xs leading-relaxed text-warning-foreground/90"
+                      >
+                        · {w}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </div>
@@ -752,188 +553,115 @@ export default function AddDomainWizard({ onClose, onDomainAdded }: Props) {
 
           {/* ── STEP 3 — Report ── */}
           {step === 3 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div className="flex flex-col gap-4">
               {/* Score summary */}
-              <div
-                style={{
-                  ...card,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 20,
-                  background: "#F8FAFC",
-                }}
-              >
+              <Card size="sm" className="flex-row items-center gap-5 bg-muted/40 p-4">
                 <ScoreRing score={score} />
-                <div style={{ flex: 1 }}>
-                  <p
-                    style={{
-                      fontSize: 18,
-                      fontWeight: 800,
-                      color: scoreColor,
-                      marginBottom: 4,
-                    }}
-                  >
+                <div className="flex-1">
+                  <p className={cn("text-lg font-bold", scoreText)}>
                     {score >= 80
                       ? "Looking good!"
                       : score >= 60
                         ? "Needs attention"
                         : "Critical issues found"}
                   </p>
-                  <p
-                    style={{
-                      fontSize: 13,
-                      fontFamily: "monospace",
-                      color: "#475569",
-                    }}
-                  >
+                  <p className="font-mono text-sm text-muted-foreground">
                     {cleanDomain(domain)}
                   </p>
-                  <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
+                  <div className="mt-2.5 flex flex-wrap gap-2">
                     {[
                       { label: "SPF", status: dnsResult?.spf?.result },
                       {
                         label: "DKIM",
-                        status: dnsResult?.dkim?.some((d: any) => d.valid)
+                        status: dnsResult?.dkim?.some(
+                          (d: DKIMRecord) => d.valid
+                        )
                           ? "pass"
                           : "fail",
                       },
                       { label: "DMARC", status: dnsResult?.dmarc?.result },
                     ].map((item) => (
-                      <div
+                      <StatusBadge
                         key={item.label}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 4,
-                        }}
-                      >
-                        <StatusIcon status={item.status || "unknown"} />
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 600,
-                            color: "#475569",
-                          }}
-                        >
-                          {item.label}
-                        </span>
-                      </div>
+                        status={statusFromString(item.status || "unknown")}
+                        label={item.label}
+                      />
                     ))}
                   </div>
                 </div>
-              </div>
+              </Card>
 
               {/* DNS Details */}
               {dnsResult && (
-                <div style={card}>
-                  <p
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: "#94A3B8",
-                      marginBottom: 12,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
-                    }}
-                  >
+                <Card size="sm" className="gap-0 p-4">
+                  <p className="mb-3 text-[11px] font-bold tracking-wider text-muted-foreground uppercase">
                     Detailed Results
                   </p>
-                  {[
-                    {
-                      label: `SPF — ${dnsResult.spf?.lookupCount || 0}/10 DNS lookups`,
-                      status: dnsResult.spf?.result,
-                      detail: dnsResult.spf?.record,
-                    },
-                    {
-                      label: `DKIM — ${dnsResult.dkim?.length || 0} selector(s)`,
-                      status: dnsResult.dkim?.some((d: DKIMRecord) => d.valid)
-                        ? "pass"
-                        : "fail",
-                      detail: dnsResult.dkim
-                        ?.map(
-                          (d: { selector: string; keyBits: number }) =>
-                            `${d.selector}(${d.keyBits}bit)`,
+                  <ul>
+                    {[
+                      {
+                        label: `SPF — ${dnsResult.spf?.lookupCount || 0}/10 DNS lookups`,
+                        status: dnsResult.spf?.result,
+                        detail: dnsResult.spf?.record,
+                      },
+                      {
+                        label: `DKIM — ${dnsResult.dkim?.length || 0} selector(s)`,
+                        status: dnsResult.dkim?.some(
+                          (d: DKIMRecord) => d.valid
                         )
-                        .join(", "),
-                    },
-                    {
-                      label: `DMARC — p=${dnsResult.dmarc?.policy || "none"}`,
-                      status: dnsResult.dmarc?.result,
-                      detail: dnsResult.dmarc?.record,
-                    },
-                  ].map((row, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: 10,
-                        padding: "10px 0",
-                        borderBottom: i < 2 ? "1px solid #F1F5F9" : "none",
-                      }}
-                    >
-                      <StatusIcon status={row.status || "unknown"} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p
-                          style={{
-                            fontSize: 13,
-                            fontWeight: 600,
-                            color: "#0F172A",
-                          }}
-                        >
-                          {row.label}
-                        </p>
-                        {row.detail && (
-                          <p
-                            style={{
-                              fontSize: 11.5,
-                              color: "#94A3B8",
-                              fontFamily: "monospace",
-                              marginTop: 2,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {row.detail}
-                          </p>
+                          ? "pass"
+                          : "fail",
+                        detail: dnsResult.dkim
+                          ?.map(
+                            (d: DKIMRecord) =>
+                              `${d.selector}(${d.keyBits}bit)`
+                          )
+                          .join(", "),
+                      },
+                      {
+                        label: `DMARC — p=${dnsResult.dmarc?.policy || "none"}`,
+                        status: dnsResult.dmarc?.result,
+                        detail: dnsResult.dmarc?.record,
+                      },
+                    ].map((row, i) => (
+                      <li
+                        key={i}
+                        className={cn(
+                          "flex items-start gap-2.5 py-2.5",
+                          i < 2 && "border-b border-border"
                         )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                      >
+                        <StatusBadge
+                          status={statusFromString(row.status || "unknown")}
+                          showIcon
+                          label=""
+                          className="mt-0.5 size-5 justify-center rounded-full p-0 [&>svg]:size-4"
+                          aria-label={row.status || "unknown"}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-foreground">
+                            {row.label}
+                          </p>
+                          {row.detail && (
+                            <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+                              {row.detail}
+                            </p>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
               )}
 
               {/* AI Analysis */}
               {aiDiagnosis && (
-                <div
-                  style={{
-                    background: "#EFF6FF",
-                    border: "1px solid #BFDBFE",
-                    borderRadius: 12,
-                    padding: 18,
-                  }}
-                >
-                  <p
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: "#2563EB",
-                      marginBottom: 12,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
-                    }}
-                  >
-                    🤖 AI Analysis
+                <div className="rounded-xl border border-info/30 bg-info-subtle p-4">
+                  <p className="mb-3 flex items-center gap-1.5 text-[11px] font-bold tracking-wider text-info-foreground uppercase">
+                    <Sparkles className="size-3.5" aria-hidden="true" />
+                    AI Analysis
                   </p>
-                  <div
-                    style={{
-                      fontSize: 13.5,
-                      color: "#1E40AF",
-                      lineHeight: 1.7,
-                      whiteSpace: "pre-wrap",
-                    }}
-                  >
+                  <div className="text-sm leading-relaxed whitespace-pre-wrap text-info-foreground">
                     {aiDiagnosis}
                   </div>
                 </div>
@@ -941,277 +669,173 @@ export default function AddDomainWizard({ onClose, onDomainAdded }: Props) {
 
               {/* Unsubscribe headers */}
               {addedDomain && (
-                <div style={card}>
-                  <p
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 700,
-                      color: "#0F172A",
-                      marginBottom: 6,
-                    }}
-                  >
-                    📧 Your List-Unsubscribe Headers
+                <Card size="sm" className="gap-0 p-4">
+                  <p className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                    <Mail className="size-4" aria-hidden="true" />
+                    Your List-Unsubscribe Headers
                   </p>
-                  <p
-                    style={{
-                      fontSize: 12.5,
-                      color: "#94A3B8",
-                      marginBottom: 12,
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    Add these to every marketing email from{" "}
-                    {cleanDomain(domain)} to comply with Gmail and Yahoo
-                    requirements.
+                  <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
+                    Add these to every marketing email from {cleanDomain(domain)}{" "}
+                    to comply with Gmail and Yahoo requirements.
                   </p>
-                  <div
-                    style={{
-                      background: "#F8FAFC",
-                      border: "1px solid #E2E8F0",
-                      borderRadius: 8,
-                      padding: "10px 14px",
-                      position: "relative",
-                    }}
-                  >
-                    <code
-                      style={{
-                        fontSize: 11.5,
-                        fontFamily: "monospace",
-                        color: "#374151",
-                        lineHeight: 1.8,
-                        display: "block",
-                        wordBreak: "break-all",
-                        paddingRight: 32,
-                      }}
-                    >
+                  <div className="relative rounded-lg border border-border bg-muted/40 px-3.5 py-2.5">
+                    <code className="block pr-9 font-mono text-xs leading-relaxed break-all text-foreground">
                       List-Unsubscribe: &lt;https://unsub.inboxrules.io/
                       {addedDomain.id}&gt;, &lt;mailto:unsubscribe@
                       {cleanDomain(domain)}?subject=unsubscribe&gt;
                       <br />
                       List-Unsubscribe-Post: List-Unsubscribe=One-Click
                     </code>
-                    <button
+                    <Button
+                      variant="outline"
+                      size="icon-xs"
                       onClick={copyHeaders}
-                      style={{
-                        position: "absolute",
-                        top: 10,
-                        right: 10,
-                        width: 28,
-                        height: 28,
-                        borderRadius: 7,
-                        border: "1px solid #E2E8F0",
-                        background: "white",
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        color: copied ? "#10B981" : "#94A3B8",
-                      }}
+                      aria-label="Copy unsubscribe headers"
+                      className="absolute top-2 right-2"
                     >
-                      {copied ? <Check size={12} /> : <Copy size={12} />}
-                    </button>
+                      {copied ? (
+                        <Check className="text-success" />
+                      ) : (
+                        <Copy />
+                      )}
+                    </Button>
                   </div>
-                </div>
+                </Card>
               )}
             </div>
           )}
 
           {/* ── STEP 4 — Done ── */}
           {step === 4 && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 20,
-                padding: "20px 0",
-                textAlign: "center",
-              }}
-            >
-              <div style={{ fontSize: 60 }}>🎉</div>
+            <div className="flex flex-col items-center gap-5 py-5 text-center">
+              <PartyPopper className="size-12 text-primary" aria-hidden="true" />
               <div>
-                <h3
-                  style={{
-                    fontSize: 20,
-                    fontWeight: 800,
-                    color: "#0F172A",
-                    marginBottom: 8,
-                  }}
-                >
+                <h3 className="mb-2 text-xl font-bold text-foreground">
                   {cleanDomain(domain)} is now being monitored
                 </h3>
-                <p style={{ fontSize: 14, color: "#475569", lineHeight: 1.6 }}>
+                <p className="text-sm leading-relaxed text-muted-foreground">
                   InboxRules will check your DNS records every 6 hours and alert
                   you immediately if anything changes or breaks.
                 </p>
               </div>
 
-              <div
-                style={{
-                  ...card,
-                  width: "100%",
-                  textAlign: "left",
-                  background: "#F8FAFC",
-                }}
+              <Card
+                size="sm"
+                className="w-full gap-0 bg-muted/40 p-4 text-left"
               >
-                <p
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: "#94A3B8",
-                    marginBottom: 14,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                  }}
-                >
+                <p className="mb-3 text-[11px] font-bold tracking-wider text-muted-foreground uppercase">
                   Recommended next steps
                 </p>
-                {[
-                  {
-                    icon: "📧",
-                    title: "Add unsubscribe headers",
-                    desc: "Copy the List-Unsubscribe headers to your email templates",
-                  },
-                  {
-                    icon: "🔔",
-                    title: "Set up Slack alerts",
-                    desc: "Get notified in Slack when something breaks",
-                  },
-                  {
-                    icon: "📊",
-                    title: "Invite your team",
-                    desc: "Add team members to monitor domains together",
-                  },
-                ].map((item, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      display: "flex",
-                      alignItems: "flex-start",
-                      gap: 12,
-                      marginBottom: 12,
-                    }}
-                  >
-                    <span style={{ fontSize: 20, flexShrink: 0 }}>
-                      {item.icon}
-                    </span>
-                    <div>
-                      <p
-                        style={{
-                          fontSize: 13.5,
-                          fontWeight: 600,
-                          color: "#0F172A",
-                        }}
-                      >
-                        {item.title}
-                      </p>
-                      <p
-                        style={{
-                          fontSize: 12.5,
-                          color: "#94A3B8",
-                          marginTop: 2,
-                        }}
-                      >
-                        {item.desc}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                <ul className="flex flex-col gap-3">
+                  {[
+                    {
+                      icon: Mail,
+                      title: "Add unsubscribe headers",
+                      desc: "Copy the List-Unsubscribe headers to your email templates",
+                    },
+                    {
+                      icon: Bell,
+                      title: "Set up Slack alerts",
+                      desc: "Get notified in Slack when something breaks",
+                    },
+                    {
+                      icon: Users,
+                      title: "Invite your team",
+                      desc: "Add team members to monitor domains together",
+                    },
+                  ].map((item) => (
+                    <li key={item.title} className="flex items-start gap-3">
+                      <item.icon
+                        className="mt-0.5 size-5 shrink-0 text-muted-foreground"
+                        aria-hidden="true"
+                      />
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          {item.title}
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {item.desc}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div
-          style={{
-            padding: "16px 24px",
-            borderTop: "1px solid #E2E8F0",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            background: "#F8FAFC",
-          }}
-        >
-          <button
+        <DialogFooter className="flex-row items-center justify-between border-t border-border bg-muted/30 p-4 sm:justify-between">
+          <Button
+            variant="outline"
             onClick={
               step === 1
                 ? onClose
                 : () => setStep((s) => Math.max(1, s - 1) as 1 | 2 | 3 | 4)
             }
-            style={btn()}
           >
             {step === 1 ? "Cancel" : "← Back"}
-          </button>
+          </Button>
 
           {step === 1 && (
-            <button
+            <Button
               onClick={handleAddDomain}
               disabled={loading || !domain.trim()}
-              style={{
-                ...btn(true),
-                opacity: loading || !domain.trim() ? 0.6 : 1,
-                cursor: loading || !domain.trim() ? "not-allowed" : "pointer",
-              }}
             >
               {loading ? (
                 <>
-                  <RefreshCw size={14} className="spin" /> Adding...
+                  <RefreshCw className="animate-spin" />
+                  Adding…
                 </>
               ) : (
                 <>
-                  Start Scan <ArrowRight size={14} />
+                  Start Scan
+                  <ArrowRight />
                 </>
               )}
-            </button>
+            </Button>
           )}
 
           {step === 2 && (
-            <button
+            <Button
               onClick={() => scanComplete && setStep(3)}
               disabled={!scanComplete}
-              style={{
-                ...btn(true),
-                opacity: !scanComplete ? 0.5 : 1,
-                cursor: !scanComplete ? "not-allowed" : "pointer",
-              }}
             >
               {scanComplete ? (
                 <>
-                  <ArrowRight size={14} />
                   View Report
+                  <ArrowRight />
                 </>
               ) : (
                 <>
-                  <RefreshCw size={14} className="spin" />
-                  Scanning...
+                  <RefreshCw className="animate-spin" />
+                  Scanning…
                 </>
               )}
-            </button>
+            </Button>
           )}
 
           {step === 3 && (
-            <button onClick={() => setStep(4)} style={btn(true)}>
-              Continue <ArrowRight size={14} />
-            </button>
+            <Button onClick={() => setStep(4)}>
+              Continue
+              <ArrowRight />
+            </Button>
           )}
 
           {step === 4 && (
-            <button
+            <Button
               onClick={() => {
-                if (addedDomain) onDomainAdded(addedDomain);
-                onClose();
-              }}
-              style={{
-                ...btn(true),
-                background: "linear-gradient(135deg, #10B981, #059669)",
+                if (addedDomain) onDomainAdded(addedDomain)
+                onClose()
               }}
             >
-              <CheckCircle size={14} /> Go to Dashboard
-            </button>
+              <CheckCircle />
+              Go to Dashboard
+            </Button>
           )}
-        </div>
-      </div>
-    </div>
-  );
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
 }
