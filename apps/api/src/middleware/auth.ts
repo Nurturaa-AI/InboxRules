@@ -78,6 +78,18 @@ export async function authMiddleware(
     const { payload } = await jwtVerify(token, getJwks(), {
       // Allow 60 seconds of clock skew — fixes the clock skew issue
       clockTolerance: 60,
+
+      // Issuer validation: Clerk tokens are always issued by your Clerk instance.
+      // This guards against tokens from a different Clerk instance or a forged
+      // issuer claim. The issuer is https://<your-instance>.clerk.accounts.dev
+      // or .com for production. Derive the expected domain from CLERK_PUBLISHABLE_KEY.
+      issuer: getJwksUrl().replace("/.well-known/jwks.json", ""),
+
+      // Authorized party (`azp`) validation: Clerk recommends verifying azp to
+      // bind tokens to your frontend origin. This prevents a token issued to
+      // attacker.com from being replayed against your API. The azp claim appears
+      // in the standard `aud` field for Clerk JWTs. In dev we allow localhost.
+      audience: process.env.FRONTEND_URL || "http://localhost:3000",
     });
 
     const clerkUserId = payload.sub;

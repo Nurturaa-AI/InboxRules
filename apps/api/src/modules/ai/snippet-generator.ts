@@ -9,6 +9,7 @@
 // This keeps costs low and responses fast for common cases.
 
 import { genAI } from "./gemini";
+import { assertAiQuota } from "./ai-quota";
 
 // ─────────────────────────────────────────────
 // TYPES
@@ -213,6 +214,12 @@ async function generateSnippetWithAi(
   request: SnippetRequest,
   tenantId: string,
 ): Promise<SnippetResult> {
+  // Enforce the per-tenant monthly AI budget before spending on Gemini.
+  // Deliberately OUTSIDE the try/catch below so an AiQuotaExceededError
+  // propagates to the route (→ 429) instead of being masked by the generic
+  // fallback snippet. Template hits never reach here, so they stay free.
+  await assertAiQuota(tenantId);
+
   const prompt = `Generate List-Unsubscribe header configuration for an email sender.
 
 ESP/Platform: ${request.esp}

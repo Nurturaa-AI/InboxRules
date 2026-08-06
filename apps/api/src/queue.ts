@@ -3,21 +3,12 @@
 // We define queues here and workers in /workers/*.worker.ts consume them.
 
 import { Queue } from "bullmq";
-import redis from "./redis";
-
-// BullMQ needs a separate Redis connection config (not the ioredis instance directly)
-// We extract the connection details from the URL
-const connection = {
-  host: new URL(process.env.REDIS_URL!).hostname,
-  port: parseInt(new URL(process.env.REDIS_URL!).port || "6379"),
-  password: new URL(process.env.REDIS_URL!).password || undefined,
-  tls: process.env.REDIS_URL!.startsWith("rediss://") ? {} : undefined,
-};
+import { redisConnectionConfig } from "./redis";
 
 // Queue for scheduled DNS checks
 // Jobs added here: { domainId: string, tenantId: string }
 export const dnsPollQueue = new Queue("dns-poll", {
-  connection,
+  connection: redisConnectionConfig,
   defaultJobOptions: {
     // Retry failed DNS checks up to 3 times
     attempts: 3,
@@ -39,7 +30,7 @@ export const dnsPollQueue = new Queue("dns-poll", {
 // Queue for sending alerts when DNS changes are detected
 // Jobs added here: { changeEventId: string, tenantId: string }
 export const alertDispatchQueue = new Queue("alert-dispatch", {
-  connection,
+  connection: redisConnectionConfig,
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: "exponential", delay: 2000 },

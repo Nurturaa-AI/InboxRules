@@ -10,6 +10,7 @@ import { z } from "zod";
 import { checkDomain } from "../dns-checker/dns.service";
 import { analyzeEmailHeaders } from "./header-analyzer";
 import { generateHeaderSnippet } from "./snippet-generator";
+import { assertAiQuota, AiQuotaExceededError } from "./ai-quota";
 
 export async function aiRoutes(app: FastifyInstance) {
   // ─────────────────────────────────────────────
@@ -48,15 +49,36 @@ export async function aiRoutes(app: FastifyInstance) {
     const { domain } = parseResult.data;
     const tenantId = request.tenantId;
 
+    // Enforce the per-tenant monthly AI budget BEFORE opening the SSE stream,
+    // so an over-quota tenant gets a clean 429 JSON response rather than a
+    // half-open event stream. (Checked here, not deeper, because once the SSE
+    // head is written we can no longer set an HTTP status code.)
+    try {
+      await assertAiQuota(tenantId);
+    } catch (err) {
+      if (err instanceof AiQuotaExceededError) {
+        return reply.status(429).send({
+          error: {
+            code: "AI_QUOTA_EXCEEDED",
+            message:
+              "Monthly AI usage limit reached for your plan. Upgrade to continue.",
+          },
+        });
+      }
+      throw err;
+    }
+
     // Set headers for Server-Sent Events (SSE)
     // This tells the browser to keep the connection open
     // and read data as it arrives
+    const origin = request.headers.origin || "";
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
-      // Required for CORS with SSE
-      "Access-Control-Allow-Origin": "*",
+      // Inherit the origin-restricted CORS already configured in server.ts,
+      // rather than hardcoding * (which is inconsistent and needlessly broad).
+      "Access-Control-Allow-Origin": origin,
     });
 
     try {
@@ -140,6 +162,15 @@ export async function aiRoutes(app: FastifyInstance) {
 
       return reply.status(200).send({ data: result });
     } catch (err: any) {
+      if (err instanceof AiQuotaExceededError) {
+        return reply.status(429).send({
+          error: {
+            code: "AI_QUOTA_EXCEEDED",
+            message:
+              "Monthly AI usage limit reached for your plan. Upgrade to continue.",
+          },
+        });
+      }
       app.log.error({ err, tenantId }, "Snippet generation failed");
       return reply.status(500).send({
         error: {

@@ -90,8 +90,18 @@ If everything is configured correctly, say so clearly and explain what each pass
       contents: prompt,
     });
 
+    // Capture usage from the stream itself. Gemini reports cumulative
+    // usageMetadata on the chunks (populated on the final chunk), so we
+    // keep the last non-empty value and log it once the stream ends —
+    // no need for a second full generateContent call (which doubled both
+    // latency and cost on every analysis).
+    let usage: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined;
+
     // Yield each text chunk as it arrives from Gemini
     for await (const chunk of streamResult) {
+      if (chunk.usageMetadata) {
+        usage = chunk.usageMetadata;
+      }
       const text = chunk.text;
       if (text) {
         yield text;
@@ -99,13 +109,6 @@ If everything is configured correctly, say so clearly and explain what each pass
     }
 
     // Log usage after stream completes
-    const result = await genAI.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: prompt,
-    });
-
-    const usage = result.usageMetadata;
-
     await logHeaderAnalysisUsage({
       tenantId,
       inputTokens: usage?.promptTokenCount,

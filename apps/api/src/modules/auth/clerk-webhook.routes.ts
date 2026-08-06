@@ -27,12 +27,20 @@ export async function clerkWebhookRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "Missing svix headers" });
     }
 
+    // Verify against the EXACT raw payload that was signed, not a
+    // re-serialized body (see the content-type parser in server.ts).
+    const rawBody = request.rawBody ?? "";
+
+    if (!rawBody) {
+      return reply.status(400).send({ error: "Missing request body" });
+    }
+
     // Verify the webhook signature using Svix
     const wh = new Webhook(webhookSecret);
     let event: any;
 
     try {
-      event = wh.verify(JSON.stringify(request.body), {
+      event = wh.verify(rawBody, {
         "svix-id": svixId,
         "svix-timestamp": svixTimestamp,
         "svix-signature": svixSignature,
@@ -111,13 +119,45 @@ export async function clerkWebhookRoutes(app: FastifyInstance) {
     if (eventType === "user.deleted") {
       const { id: clerkId } = event.data;
 
-      // Soft delete the user
+      // Look up the user to find their tenant before soft-deleting
+      const user = await db.user.findFirst({
+        where: { clerkId },
+        select: { id: true, tenantId: true, role: true },
+      });
+
+      if (!user) {
+        console.log(`[Clerk Webhook] User ${clerkId} not found — already deleted`);
+        return reply.status(200).send({ received: true });
+      }
+
+      // Soft-delete the user
       await db.user.updateMany({
         where: { clerkId },
         data: { deletedAt: new Date() },
       });
 
-      console.log(`[Clerk Webhook] Soft deleted user ${clerkId}`);
+      // If this was the owner of the tenant, cascade soft-delete the tenant
+      // and all its domains. A tenant without an owner is orphaned and can't
+      // be accessed or managed. In a multi-user future, this would check if
+      // other owners remain; for now every tenant has exactly one owner.
+      if (user.role === "owner") {
+        await db.tenant.update({
+          where: { id: user.tenantId },
+          data: { deletedAt: new Date() },
+        });
+
+        // Soft-delete all domains belonging to this tenant
+        await db.domain.updateMany({
+          where: { tenantId: user.tenantId },
+          data: { deletedAt: new Date() },
+        });
+
+        console.log(
+          `[Clerk Webhook] Soft deleted user ${clerkId}, tenant ${user.tenantId}, and its domains`,
+        );
+      } else {
+        console.log(`[Clerk Webhook] Soft deleted user ${clerkId}`);
+      }
     }
 
     return reply.status(200).send({ received: true });

@@ -1,5 +1,6 @@
 import { FastifyInstance } from "fastify";
 import crypto from "crypto";
+import db from "../../db";
 import {
   getSubscription,
   createCheckout,
@@ -57,7 +58,7 @@ export async function billingRoutes(app: FastifyInstance) {
 
     try {
       // Get the user's email for the checkout
-      const user = await app.prisma.user.findFirst({
+      const user = await db.user.findFirst({
         where: { id: request.userId },
       });
 
@@ -145,8 +146,15 @@ export async function billingRoutes(app: FastifyInstance) {
 
 export async function billingWebhookRoutes(app: FastifyInstance) {
   app.post("/webhooks/billing", async (request, reply) => {
-    // Get the raw body for signature verification
-    const rawBody = JSON.stringify(request.body);
+    // Verify against the EXACT raw payload that was signed, not a
+    // re-serialized body (see the content-type parser in server.ts).
+    const rawBody = request.rawBody ?? "";
+
+    if (!rawBody) {
+      return reply
+        .status(400)
+        .send({ error: { message: "Missing request body" } });
+    }
 
     // Verify the webhook signature from Lemon Squeezy
     const signature = request.headers["x-signature"] as string;

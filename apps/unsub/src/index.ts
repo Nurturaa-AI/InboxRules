@@ -134,49 +134,53 @@ async function handleOneClickUnsubscribe(
     console.log("[Unsub] Unexpected POST body:", body.substring(0, 100));
   }
 
+  // A browser form submit (our confirmation page) accepts HTML; a mail server
+  // doing true RFC 8058 one-click does not. Record the method accordingly.
+  const method = wantsHtml(request) ? "manual_click" : "one_click";
+
   // Verify the token is valid and record the unsubscribe
-  const result = await processUnsubscribe(token, env, "one_click");
+  const result = await processUnsubscribe(token, env, method);
 
   if (!result.success) {
     // Return 200 regardless — email clients should not retry on failure
     // Log the error internally for debugging
     console.error("[Unsub] One-click failed:", result.error);
-    return successResponse();
+  }
+
+  // A browser confirmation form (see the GET page) sends Accept: text/html and
+  // expects a human-readable page. Mail servers doing RFC 8058 one-click just
+  // need a 200. Branch the response on what the client accepts.
+  if (wantsHtml(request)) {
+    return htmlResponse(buildSuccessPage());
   }
 
   return successResponse();
 }
 
 // ─────────────────────────────────────────────
-// MANUAL UNSUBSCRIBE HANDLER
-// Called when user clicks the regular unsubscribe link
-// Shows an HTML confirmation page
+// MANUAL UNSUBSCRIBE HANDLER (GET)
+// Called when a user clicks the regular unsubscribe link in a browser.
+//
+// IMPORTANT (RFC 8058 §3.2): a GET MUST NOT perform the unsubscribe. Mail
+// clients, link scanners, and prefetchers issue GETs on links, which would
+// silently unsubscribe recipients. So GET only renders a confirmation page;
+// the actual state change happens when the user submits the form, which POSTs
+// back to this same URL and lands in handleOneClickUnsubscribe above.
 // ─────────────────────────────────────────────
 
 async function handleManualUnsubscribe(
-  request: Request,
-  env: Env,
+  _request: Request,
+  _env: Env,
   pathname: string,
 ): Promise<Response> {
   const token = extractToken(pathname);
 
-  if (!token) {
+  if (!token || !isValidTokenFormat(token)) {
     return htmlResponse(buildErrorPage("Invalid unsubscribe link"));
   }
 
-  // Process the unsubscribe
-  const result = await processUnsubscribe(token, env, "manual_click");
-
-  if (!result.success) {
-    // Show a generic success page even on error
-    // We do not want users to see error messages
-    // Log the error internally
-    console.error("[Unsub] Manual unsubscribe failed:", result.error);
-  }
-
-  // Always show the success page
-  // The user clicked unsubscribe — honor it and confirm it
-  return htmlResponse(buildSuccessPage());
+  // Render the confirmation page only — no unsubscribe is performed here.
+  return htmlResponse(buildConfirmPage(token));
 }
 
 // ─────────────────────────────────────────────
@@ -200,6 +204,11 @@ async function processUnsubscribe(
     return { success: false, error: "Invalid token format" };
   }
 
+  // Bound the API call so we always answer within the RFC 8058 10s budget,
+  // even if the backend is slow or hung. 5s leaves headroom for the response.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+
   try {
     // Call our main API to record the unsubscribe event
     // The API verifies the HMAC signature and writes to the database
@@ -216,19 +225,24 @@ async function processUnsubscribe(
         // Include the timestamp so the API can detect replay attacks
         processedAt: new Date().toISOString(),
       }),
+      signal: controller.signal,
     });
 
     if (!response.ok) {
-      const error = await response.text();
+      // Do not surface the backend's response body to the caller — it may leak
+      // internal detail. Log the status only.
       return {
         success: false,
-        error: `API returned ${response.status}: ${error}`,
+        error: `API returned ${response.status}`,
       };
     }
 
     return { success: true };
   } catch (err: any) {
-    return { success: false, error: `Network error: ${err.message}` };
+    const reason = err?.name === "AbortError" ? "timeout" : err?.message;
+    return { success: false, error: `Network error: ${reason}` };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -256,6 +270,22 @@ function extractToken(pathname: string): string | null {
 function isValidTokenFormat(token: string): boolean {
   // HMAC-SHA256 output is 64 hex characters
   return /^[a-f0-9]{64}$/.test(token);
+}
+
+// Check if the client wants HTML (browser) vs plain text (mail server)
+function wantsHtml(request: Request): boolean {
+  const accept = request.headers.get("Accept") || "";
+  return accept.includes("text/html");
+}
+
+// Escape HTML entities to prevent XSS if dynamic content is ever rendered
+function escapeHtml(unsafe: string): string {
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 // Standard CORS headers for the worker
@@ -376,7 +406,93 @@ function buildSuccessPage(): string {
 </html>`;
 }
 
+// Confirmation page shown on GET. Submitting the form POSTs to the same URL,
+// which is what actually performs the unsubscribe (RFC 8058: GET must not).
+function buildConfirmPage(token: string): string {
+  // token is validated as 64-char hex before we get here, but escape it anyway
+  // as defence-in-depth since it is interpolated into an HTML attribute.
+  const safeToken = escapeHtml(token);
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Confirm Unsubscribe</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f9fafb;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 48px 40px;
+      max-width: 440px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .icon {
+      width: 56px;
+      height: 56px;
+      background: #fef3c7;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 24px;
+      font-size: 24px;
+    }
+    h1 { font-size: 22px; font-weight: 700; color: #111827; margin-bottom: 12px; }
+    p { font-size: 15px; color: #6b7280; line-height: 1.6; margin-bottom: 24px; }
+    button {
+      font: inherit;
+      font-size: 15px;
+      font-weight: 600;
+      color: white;
+      background: #dc2626;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 28px;
+      cursor: pointer;
+    }
+    button:hover { background: #b91c1c; }
+    .footer {
+      margin-top: 32px;
+      padding-top: 20px;
+      border-top: 1px solid #f3f4f6;
+      font-size: 12px;
+      color: #9ca3af;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon"></div>
+    <h1>Confirm unsubscribe</h1>
+    <p>
+      Click the button below to stop receiving emails from this sender.
+    </p>
+    <form method="POST" action="/unsubscribe/${safeToken}">
+      <input type="hidden" name="List-Unsubscribe" value="One-Click">
+      <button type="submit">Unsubscribe me</button>
+    </form>
+    <div class="footer">
+      Unsubscribe powered by InboxRules
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
 function buildErrorPage(message: string): string {
+  const safeMessage = escapeHtml(message);
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -443,7 +559,7 @@ function buildErrorPage(message: string): string {
 <body>
   <div class="card">
     <div class="icon"></div>
-    <h1>Link expired or invalid</h1>
+    <h1>${safeMessage}</h1>
     <p>
       This unsubscribe link is no longer valid.
       Please use the unsubscribe link in your most recent email.

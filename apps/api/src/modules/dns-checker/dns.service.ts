@@ -21,6 +21,37 @@ import {
 // Gmail, Yahoo, and Microsoft all reject at > 10 SPF lookups
 const SPF_LOOKUP_LIMIT = 10;
 
+// Per-query DNS timeout. node's dns.resolveTxt has no built-in timeout: a slow
+// or unresponsive authoritative nameserver can hang the promise until the OS
+// resolver gives up (often 20-30s+). Because DNS scans run on BullMQ workers
+// with a small concurrency (5), a few hung lookups can starve every worker
+// slot. We race each query against this deadline and treat a timeout like any
+// other DNS failure (ETIMEOUT is handled by the existing catch blocks).
+const DNS_QUERY_TIMEOUT_MS = 5000;
+
+// Resolves TXT records for a name, rejecting if it takes longer than
+// DNS_QUERY_TIMEOUT_MS. The rejection carries code "ETIMEOUT" so the existing
+// error handling (which branches on err.code) treats it as a normal DNS error.
+async function resolveTxtWithTimeout(name: string): Promise<string[][]> {
+  let timer: NodeJS.Timeout;
+
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(`DNS query for ${name} timed out`) as Error & {
+        code: string;
+      };
+      err.code = "ETIMEOUT";
+      reject(err);
+    }, DNS_QUERY_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([dns.resolveTxt(name), timeout]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
 // Common DKIM selectors used by popular ESPs
 // We check these because users don't always know their selector
 const COMMON_DKIM_SELECTORS = [
@@ -113,7 +144,7 @@ async function checkSpf(domain: string): Promise<SpfResult> {
   try {
     // Query all TXT records for the domain
     // TXT records contain SPF, DMARC, and other text-based DNS records
-    txtRecords = await dns.resolveTxt(domain);
+    txtRecords = await resolveTxtWithTimeout(domain);
   } catch (err: any) {
     // ENOTFOUND = domain doesn't exist
     // ENODATA = domain exists but has no TXT records
@@ -239,6 +270,13 @@ async function countSpfLookups(
   let count = 0;
   const chain: string[] = [];
 
+  // Early-exit once we exceed the RFC limit. Without this, a crafted include
+  // chain can fan out dozens of live TXT queries even though the final count
+  // will be marked as permerror anyway. The visited set bounds loops, but not
+  // breadth: each unchecked level can add multiple includes. Stop counting
+  // (and making queries) once the limit is breached.
+  const earlyExitThreshold = SPF_LOOKUP_LIMIT + 1;
+
   // These mechanisms each cost one DNS lookup (RFC 7208 Section 4.6.4)
   const lookupMechanisms = [
     "include:",
@@ -262,15 +300,28 @@ async function countSpfLookups(
       count += matches.length;
       chain.push(`${mechanism} × ${matches.length}`);
     }
+
+    // Early-exit once we exceed the limit — no point counting further or
+    // making additional DNS queries when the record will be marked permerror.
+    if (count >= earlyExitThreshold) {
+      chain.push("Lookup limit exceeded");
+      return { count, chain };
+    }
   }
 
   // For each include: mechanism, recursively count its lookups too
   // because those also count toward the total
   const includeMatches = record.matchAll(/include:(\S+)/gi);
   for (const match of includeMatches) {
+    // Early-exit once we exceed the limit
+    if (count >= earlyExitThreshold) {
+      chain.push("Lookup limit exceeded during include traversal");
+      return { count, chain };
+    }
+
     const includedDomain = match[1];
     try {
-      const txtRecords = await dns.resolveTxt(includedDomain);
+      const txtRecords = await resolveTxtWithTimeout(includedDomain);
       const allTxt = txtRecords.map((c) => c.join("")).join("");
       const includedSpf = allTxt
         .split("\n")
@@ -343,7 +394,7 @@ async function checkDkimSelector(
   let txtRecords: string[][];
 
   try {
-    txtRecords = await dns.resolveTxt(dkimDomain);
+    txtRecords = await resolveTxtWithTimeout(dkimDomain);
   } catch (err: any) {
     // ENOTFOUND or ENODATA = this selector doesn't exist, which is normal
     if (
@@ -439,7 +490,7 @@ async function checkDmarc(domain: string): Promise<DmarcResult> {
   let txtRecords: string[][];
 
   try {
-    txtRecords = await dns.resolveTxt(dmarcDomain);
+    txtRecords = await resolveTxtWithTimeout(dmarcDomain);
   } catch (err: any) {
     if (err.code === "ENOTFOUND" || err.code === "ENODATA") {
       return {

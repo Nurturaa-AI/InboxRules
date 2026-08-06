@@ -22,7 +22,10 @@ import {
   billingWebhookRoutes,
 } from "./modules/billing/billing.routes";
 import { clerkWebhookRoutes } from "./modules/auth/clerk-webhook.routes";
-import { suppressionRoutes } from "./modules/suppression/suppression.routes";
+import {
+  suppressionRoutes,
+  internalSuppressionRoutes,
+} from "./modules/suppression/suppression.routes";
 
 // Create the Fastify app instance
 const app = Fastify({
@@ -35,6 +38,28 @@ const app = Fastify({
 });
 
 async function buildApp() {
+  // ─────────────────────────────────────────────
+  // RAW BODY CAPTURE
+  // Replace the default JSON parser with one that also keeps the raw payload
+  // string on request.rawBody. Webhook routes (Lemon Squeezy, Clerk/svix) must
+  // verify provider signatures against the EXACT bytes that were signed — a
+  // re-serialized JSON.stringify(request.body) does not reliably reproduce
+  // key order / whitespace / unicode escaping, so it can reject valid hooks.
+  // ─────────────────────────────────────────────
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "string" },
+    (_req, body: string, done) => {
+      try {
+        const json = body.length ? JSON.parse(body) : {};
+        (_req as { rawBody?: string }).rawBody = body;
+        done(null, json);
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    },
+  );
+
   // ─────────────────────────────────────────────
   // SECURITY PLUGINS
   // ─────────────────────────────────────────────
@@ -82,8 +107,9 @@ async function buildApp() {
   }));
 
   // Suppression internal routes (called by the Cloudflare Worker)
-  // (it uses its own internal key auth, not Clerk)
-  app.register(suppressionRoutes, { prefix: "" });
+  // (it uses its own internal key auth, not Clerk). This plugin contains
+  // ONLY POST /internal/unsubscribe — no tenant-scoped routes.
+  app.register(internalSuppressionRoutes, { prefix: "" });
 
   // ─────────────────────────────────────────────
   // AUTHENTICATED ROUTES
@@ -115,7 +141,6 @@ async function buildApp() {
   // ── Outside protected routes (public webhook) ──
   app.register(billingWebhookRoutes);
   app.register(clerkWebhookRoutes);
-  // app.register(suppressionRoutes); // for /internal/unsubscribe
 
   // ─────────────────────────────────────────────
   // GLOBAL ERROR HANDLER
