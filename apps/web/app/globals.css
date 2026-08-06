@@ -66,11 +66,6 @@
   --color-info-foreground: var(--info-foreground);
   --color-info-subtle: var(--info-subtle);
 
-  /* Legacy token bridge — the dashboard references these names directly.
-     Kept as aliases so not-yet-migrated pages render correctly. */
-  --color-surface: var(--surface);
-  --color-surface-2: var(--surface-2);
-
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -146,15 +141,6 @@
   --sidebar-accent-foreground: oklch(0.98 0.005 265);
   --sidebar-border: oklch(0.3 0.02 266);
   --sidebar-ring: oklch(0.55 0.21 274);
-
-  /* Legacy bridge aliases → map old names onto the real palette */
-  --surface: var(--card);
-  --surface-2: var(--muted);
-  --bg: var(--background);
-  --text: var(--foreground);
-  --text-2: var(--muted-foreground);
-  --text-3: oklch(0.63 0.02 266);
-  --border-2: oklch(0.88 0.006 265);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -217,15 +203,6 @@
   --sidebar-accent-foreground: oklch(0.96 0.005 265);
   --sidebar-border: oklch(0.26 0.02 266);
   --sidebar-ring: oklch(0.62 0.19 274);
-
-  /* Legacy bridge aliases */
-  --surface: var(--card);
-  --surface-2: var(--muted);
-  --bg: var(--background);
-  --text: var(--foreground);
-  --text-2: var(--muted-foreground);
-  --text-3: oklch(0.58 0.02 266);
-  --border-2: oklch(0.34 0.02 266);
 }
 
 @layer base {
@@ -238,29 +215,4 @@
   html {
     @apply font-sans;
   }
-}
-
-/* Legacy spinner utility — retained for not-yet-migrated pages.
-   Migrated components use Tailwind's `animate-spin`. */
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.4;
-  }
-}
-
-.spin {
-  animation: spin 1s linear infinite;
 }

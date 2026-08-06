@@ -1,15 +1,47 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useSyncExternalStore } from "react";
 import { useAuth } from "@clerk/nextjs";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4500";
+
+/**
+ * Tiny module-level pub/sub so a mutation anywhere (e.g. adding a domain from
+ * the shell) can refresh every mounted query without a full-page reload.
+ * `refreshAllQueries()` bumps a version that all live `useApiQuery` hooks
+ * subscribe to via `useSyncExternalStore`, triggering a refetch.
+ */
+let refreshVersion = 0;
+const refreshListeners = new Set<() => void>();
+
+export function refreshAllQueries() {
+  refreshVersion += 1;
+  refreshListeners.forEach((fn) => fn());
+}
+
+function subscribeRefresh(fn: () => void) {
+  refreshListeners.add(fn);
+  return () => {
+    refreshListeners.delete(fn);
+  };
+}
+
+function getRefreshVersion() {
+  return refreshVersion;
+}
 
 export function useApiQuery<T>(path: string) {
   const { getToken } = useAuth();
   const [data,    setData]    = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
+
+  // Re-render (and refetch) whenever a global refresh is broadcast.
+  const version = useSyncExternalStore(
+    subscribeRefresh,
+    getRefreshVersion,
+    getRefreshVersion,
+  );
 
   const refetch = useCallback(async () => {
     try {
@@ -43,7 +75,8 @@ export function useApiQuery<T>(path: string) {
     }, 0);
 
     return () => clearTimeout(timer);
-  }, [refetch]);
+    // `version` bumps on a global refresh broadcast → re-run the fetch.
+  }, [refetch, version]);
 
   return { data, loading, error, refetch };
 }

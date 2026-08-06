@@ -4,6 +4,7 @@ import { useState } from "react"
 import Sidebar from "@/components/dashboard/Sidebar"
 import DashboardShell from "@/components/dashboard/DashboardShell"
 import AddDomainWizard from "@/components/dashboard/AddDomainWizard"
+import { refreshAllQueries } from "@/lib/useApiQuery"
 
 export default function DashboardLayout({
   children,
@@ -29,8 +30,9 @@ export default function DashboardLayout({
           onClose={() => setShowWizard(false)}
           onDomainAdded={() => {
             setShowWizard(false)
-            // Trigger a page refresh to show the new domain
-            window.location.reload()
+            // Refresh every mounted query in place so the new domain appears
+            // without a full-page reload.
+            refreshAllQueries()
           }}
         />
       )}

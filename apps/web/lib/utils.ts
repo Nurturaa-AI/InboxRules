@@ -24,15 +24,6 @@ export function scoreToStatus(score: number): "success" | "warning" | "danger" {
 }
 
 /**
- * Health-score color as a themeable CSS variable reference.
- * Prefer the `HealthScore` component; this remains for inline `style` use
- * in pages not yet migrated to the design system.
- */
-export function scoreColor(score: number): string {
-  return `var(--${scoreToStatus(score)})`;
-}
-
-/**
  * Shared relative-time formatter.
  * Replaces the 4 duplicated copies across domains/alerts/unsubscribe/AlertsFeed.
  */
