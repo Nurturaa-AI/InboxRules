@@ -1,14 +1,33 @@
-"use client";
+"use client"
 
-import { usePathname } from "next/navigation";
-import { useState, useRef, useEffect } from "react";
-import { useAuth } from "@clerk/nextjs";
-import { Sun, Moon, Bell, Search, Plus, X, CheckCircle } from "lucide-react";
+import * as React from "react"
+import { usePathname } from "next/navigation"
+import Link from "next/link"
+import { useAuth } from "@clerk/nextjs"
+import { useTheme } from "next-themes"
+import { Sun, Moon, Bell, Plus, CheckCircle2, Menu } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import { SearchInput } from "@/components/shared/SearchInput"
+import { StatusBadge, statusFromString } from "@/components/shared/StatusBadge"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { cn } from "@/lib/utils"
 
 interface Props {
-  theme: "light" | "dark";
-  onToggleTheme: () => void;
-  onAddDomain?: () => void;
+  onAddDomain?: () => void
+  onMenuClick?: () => void
+}
+
+interface AlertNotification {
+  id: string
+  changeType: string
+  severity?: string
+  aiTitle?: string
+  domain?: { domain?: string }
 }
 
 const PAGE_META: Record<string, { title: string; sub: string }> = {
@@ -44,105 +63,77 @@ const PAGE_META: Record<string, { title: string; sub: string }> = {
     title: "Settings",
     sub: "Account preferences and integrations",
   },
-};
+}
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4500";
+const CHANGE_LABELS: Record<string, string> = {
+  spf_lookup_exceeded: "SPF Lookup Limit Exceeded",
+  spf_record_changed: "SPF Record Changed",
+  dmarc_policy_weakened: "DMARC Policy Weakened",
+  dmarc_record_removed: "DMARC Record Removed",
+}
 
-export default function Header({ theme, onToggleTheme, onAddDomain }: Props) {
-  const pathname = usePathname();
-  const { getToken } = useAuth();
-  const meta = PAGE_META[pathname] ?? PAGE_META["/dashboard"];
-  const isDark = theme === "dark";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4500"
 
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [notifications, setNotifications] = useState<any[]>([]);
-  const [notifLoading, setNotifLoading] = useState(false);
-  const bellRef = useRef<HTMLButtonElement>(null);
-  const dropRef = useRef<HTMLDivElement>(null);
+export default function Header({ onAddDomain, onMenuClick }: Props) {
+  const pathname = usePathname()
+  const { getToken } = useAuth()
+  const { resolvedTheme, setTheme } = useTheme()
+  const meta = PAGE_META[pathname] ?? PAGE_META["/dashboard"]
 
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (
-        dropRef.current &&
-        !dropRef.current.contains(e.target as Node) &&
-        !bellRef.current?.contains(e.target as Node)
-      ) {
-        setShowNotifications(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
+  const [search, setSearch] = React.useState("")
+  const [notifications, setNotifications] = React.useState<AlertNotification[]>([])
+  const [notifLoading, setNotifLoading] = React.useState(false)
 
-  // Fetch notifications when bell is clicked
-  async function handleBellClick() {
-    setShowNotifications((prev) => !prev);
-    if (!showNotifications) {
-      setNotifLoading(true);
+  // Fetch unresolved alerts once on mount so the dot reflects real unread count.
+  React.useEffect(() => {
+    let cancelled = false
+    async function loadNotifications() {
+      setNotifLoading(true)
       try {
-        const token = await getToken();
+        const token = await getToken()
         const response = await fetch(
           `${API_URL}/api/v1/alerts?status=unresolved&limit=5`,
-          { headers: { Authorization: `Bearer ${token}` } },
-        );
+          { headers: { Authorization: `Bearer ${token}` } }
+        )
         if (response.ok) {
-          const data = await response.json();
-          const items = data.data || data.items || [];
-          setNotifications(items);
+          const data = await response.json()
+          const items: AlertNotification[] = data.data || data.items || []
+          if (!cancelled) setNotifications(items)
         }
       } catch {
         /* fail silently */
       } finally {
-        setNotifLoading(false);
+        if (!cancelled) setNotifLoading(false)
       }
     }
-  }
+    loadNotifications()
+    return () => {
+      cancelled = true
+    }
+  }, [getToken])
 
-  const btnBase: React.CSSProperties = {
-    width: 38,
-    height: 38,
-    borderRadius: 10,
-    border: "1px solid var(--border)",
-    background: "var(--surface)",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    color: "var(--text-2)",
-  };
-
-  const CHANGE_LABELS: Record<string, string> = {
-    spf_lookup_exceeded: "SPF Lookup Limit Exceeded",
-    spf_record_changed: "SPF Record Changed",
-    dmarc_policy_weakened: "DMARC Policy Weakened",
-    dmarc_record_removed: "DMARC Record Removed",
-  };
+  const isDark = resolvedTheme === "dark"
+  const hasUnread = notifications.length > 0
 
   return (
-    <header
-      className="flex items-center gap-4 shrink-0"
-      style={{
-        height: 65,
-        padding: "0 24px",
-        background: "var(--surface)",
-        borderBottom: "1px solid var(--border)",
-      }}
-    >
+    <header className="flex h-16 shrink-0 items-center gap-3 border-b border-border bg-card px-4 sm:px-6">
+      {/* Mobile menu trigger */}
+      <Button
+        variant="outline"
+        size="icon-sm"
+        onClick={onMenuClick}
+        className="lg:hidden"
+        aria-label="Open navigation menu"
+      >
+        <Menu />
+      </Button>
+
       {/* Page title */}
-      <div style={{ flex: 1 }}>
-        <h1
-          style={{
-            fontSize: 18,
-            fontWeight: 800,
-            color: "var(--text)",
-            letterSpacing: "-0.4px",
-            lineHeight: 1,
-          }}
-        >
+      <div className="min-w-0 flex-1">
+        <h1 className="truncate text-lg font-semibold tracking-tight text-foreground">
           {meta.title}
         </h1>
-        <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 4 }}>
+        <p className="hidden truncate text-xs text-muted-foreground sm:block">
           {meta.sub}
         </p>
       </div>
@@ -150,274 +141,123 @@ export default function Header({ theme, onToggleTheme, onAddDomain }: Props) {
       {/* Controls */}
       <div className="flex items-center gap-2">
         {/* Search */}
-        <div
-          className="hidden md:flex items-center gap-2"
-          style={{
-            height: 38,
-            padding: "0 13px",
-            background: "var(--surface-2)",
-            border: "1px solid var(--border)",
-            borderRadius: 10,
-            width: 220,
-          }}
-        >
-          <Search size={14} style={{ color: "var(--text-3)", flexShrink: 0 }} />
-          <input
-            type="text"
-            placeholder="Search domains..."
-            style={{
-              background: "none",
-              border: "none",
-              outline: "none",
-              fontSize: 13,
-              color: "var(--text)",
-              fontFamily: "var(--font-sans)",
-              width: "100%",
-            }}
+        <div className="hidden md:block md:w-56">
+          <SearchInput
+            value={search}
+            onValueChange={setSearch}
+            label="Search domains"
+            placeholder="Search domains…"
           />
         </div>
 
         {/* Theme toggle */}
-        <button
-          onClick={onToggleTheme}
-          style={btnBase}
-          title={isDark ? "Light mode" : "Dark mode"}
+        <Button
+          variant="outline"
+          size="icon-sm"
+          onClick={() => setTheme(isDark ? "light" : "dark")}
+          aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
         >
-          {isDark ? <Sun size={16} /> : <Moon size={16} />}
-        </button>
+          <Sun className="hidden dark:block" />
+          <Moon className="dark:hidden" />
+        </Button>
 
-        {/* Notifications bell with dropdown */}
-        <div style={{ position: "relative" }}>
-          <button
-            ref={bellRef}
-            onClick={handleBellClick}
-            style={{ ...btnBase, position: "relative" }}
-            title="Notifications"
-          >
-            <Bell size={16} />
-            {/* Red dot — always show if there could be alerts */}
-            <span
-              style={{
-                position: "absolute",
-                top: 8,
-                right: 8,
-                width: 7,
-                height: 7,
-                background: "#EF4444",
-                borderRadius: "50%",
-                border: "2px solid var(--surface)",
-              }}
-            />
-          </button>
-
-          {/* Dropdown panel */}
-          {showNotifications && (
-            <div
-              ref={dropRef}
-              style={{
-                position: "absolute",
-                top: "calc(100% + 8px)",
-                right: 0,
-                width: 340,
-                background: "var(--surface)",
-                border: "1px solid var(--border)",
-                borderRadius: 14,
-                boxShadow: "0 12px 40px rgba(0,0,0,0.15)",
-                zIndex: 500,
-                overflow: "hidden",
-              }}
+        {/* Notifications */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              className="relative"
+              aria-label={
+                hasUnread
+                  ? `Notifications, ${notifications.length} unread`
+                  : "Notifications"
+              }
             >
-              {/* Dropdown header */}
-              <div
-                className="flex items-center justify-between"
-                style={{
-                  padding: "14px 16px",
-                  borderBottom: "1px solid var(--border)",
-                }}
-              >
-                <p
-                  style={{
-                    fontSize: 14,
-                    fontWeight: 700,
-                    color: "var(--text)",
-                  }}
-                >
-                  Notifications
-                </p>
-                <button
-                  onClick={() => setShowNotifications(false)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    color: "var(--text-3)",
-                    display: "flex",
-                  }}
-                >
-                  <X size={14} />
-                </button>
-              </div>
-
-              {/* Notification list */}
-              {notifLoading ? (
-                <div style={{ padding: 24, textAlign: "center" }}>
-                  <p style={{ fontSize: 13, color: "var(--text-3)" }}>
-                    Loading...
-                  </p>
-                </div>
-              ) : notifications.length === 0 ? (
-                <div style={{ padding: 32, textAlign: "center" }}>
-                  <CheckCircle
-                    size={28}
-                    color="#10B981"
-                    style={{ margin: "0 auto 10px" }}
-                  />
-                  <p
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 600,
-                      color: "var(--text)",
-                    }}
-                  >
-                    All clear
-                  </p>
-                  <p
-                    style={{
-                      fontSize: 12.5,
-                      color: "var(--text-3)",
-                      marginTop: 4,
-                    }}
-                  >
-                    No unresolved alerts right now
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  {notifications.map((notif: any) => (
-                    <div
-                      key={notif.id}
-                      style={{
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: 10,
-                        padding: "12px 16px",
-                        borderBottom: "1px solid var(--border)",
-                        transition: "background 0.12s",
-                        cursor: "pointer",
-                      }}
-                      onMouseEnter={(e) => {
-                        (e.currentTarget as HTMLDivElement).style.background =
-                          "var(--surface-2)";
-                      }}
-                      onMouseLeave={(e) => {
-                        (e.currentTarget as HTMLDivElement).style.background =
-                          "transparent";
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: 8,
-                          height: 8,
-                          borderRadius: "50%",
-                          flexShrink: 0,
-                          marginTop: 4,
-                          background:
-                            notif.severity === "critical"
-                              ? "#EF4444"
-                              : notif.severity === "warning"
-                                ? "#F59E0B"
-                                : "#3B82F6",
-                        }}
-                      />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p
-                          style={{
-                            fontSize: 13,
-                            fontWeight: 600,
-                            color: "var(--text)",
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {notif.aiTitle ||
-                            CHANGE_LABELS[notif.changeType] ||
-                            notif.changeType}
-                        </p>
-                        <p
-                          style={{
-                            fontSize: 11.5,
-                            color: "var(--text-3)",
-                            fontFamily: "var(--font-mono)",
-                            marginTop: 2,
-                          }}
-                        >
-                          {notif.domain?.domain}
-                        </p>
-                      </div>
-                      <span
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          padding: "2px 7px",
-                          borderRadius: 999,
-                          flexShrink: 0,
-                          background:
-                            notif.severity === "critical"
-                              ? "rgba(239,68,68,0.1)"
-                              : "rgba(245,158,11,0.1)",
-                          color:
-                            notif.severity === "critical"
-                              ? "#EF4444"
-                              : "#F59E0B",
-                        }}
-                      >
-                        {notif.severity?.toUpperCase()}
-                      </span>
-                    </div>
-                  ))}
-                  <div style={{ padding: "12px 16px", textAlign: "center" }}>
-                    <a
-                      href="/dashboard/alerts"
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 600,
-                        color: "#2563EB",
-                        textDecoration: "none",
-                      }}
-                    >
-                      View all alerts →
-                    </a>
-                  </div>
-                </div>
+              <Bell />
+              {hasUnread && (
+                <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-danger ring-2 ring-card" />
+              )}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-80 p-0">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <p className="text-sm font-semibold text-foreground">
+                Notifications
+              </p>
+              {hasUnread && (
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {notifications.length} unread
+                </span>
               )}
             </div>
-          )}
-        </div>
+
+            {notifLoading ? (
+              <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                Loading…
+              </div>
+            ) : notifications.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
+                <CheckCircle2 className="size-7 text-success" />
+                <p className="text-sm font-semibold text-foreground">All clear</p>
+                <p className="text-xs text-muted-foreground">
+                  No unresolved alerts right now
+                </p>
+              </div>
+            ) : (
+              <div className="max-h-80 overflow-y-auto">
+                {notifications.map((notif) => (
+                  <div
+                    key={notif.id}
+                    className="flex items-start gap-3 border-b border-border px-4 py-3 last:border-b-0"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-foreground">
+                        {notif.aiTitle ||
+                          CHANGE_LABELS[notif.changeType] ||
+                          notif.changeType}
+                      </p>
+                      {notif.domain?.domain && (
+                        <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+                          {notif.domain.domain}
+                        </p>
+                      )}
+                    </div>
+                    <StatusBadge
+                      status={statusFromString(notif.severity)}
+                      label={notif.severity?.toUpperCase()}
+                      showIcon={false}
+                      className={cn("shrink-0")}
+                    />
+                  </div>
+                ))}
+                <div className="px-4 py-3 text-center">
+                  <Link
+                    href="/dashboard/alerts"
+                    className="text-sm font-medium text-primary hover:underline"
+                  >
+                    View all alerts →
+                  </Link>
+                </div>
+              </div>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         {/* Add domain */}
-        <button
-          onClick={onAddDomain}
-          className="flex items-center gap-1.5"
-          style={{
-            height: 38,
-            padding: "0 16px",
-            background: "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)",
-            color: "white",
-            border: "none",
-            borderRadius: 10,
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: "pointer",
-            fontFamily: "var(--font-sans)",
-            boxShadow: "0 4px 12px rgba(37,99,235,0.3)",
-            whiteSpace: "nowrap",
-          }}
-        >
-          <Plus size={14} strokeWidth={2.5} />
+        <Button onClick={onAddDomain} size="sm" className="hidden sm:inline-flex">
+          <Plus strokeWidth={2.5} />
           Add Domain
-        </button>
+        </Button>
+        <Button
+          onClick={onAddDomain}
+          size="icon-sm"
+          className="sm:hidden"
+          aria-label="Add domain"
+        >
+          <Plus strokeWidth={2.5} />
+        </Button>
       </div>
     </header>
-  );
+  )
 }

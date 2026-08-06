@@ -25,7 +25,7 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "InboxRules — Email Compliance Dashboard",
   description:
-    "Monitor SPF, DKIM, DMARC and deliverability for your sending domains',",
+    "Monitor SPF, DKIM, DMARC and deliverability for your sending domains.",
 };
 
 export default function RootLayout({

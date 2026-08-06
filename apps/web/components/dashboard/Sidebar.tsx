@@ -183,9 +183,13 @@ function SidebarContent({ onClose }: SidebarContentProps) {
   )
 }
 
-export default function Sidebar() {
-  const [mobileOpen, setMobileOpen] = React.useState(false)
-
+export default function Sidebar({
+  mobileOpen = false,
+  onMobileOpenChange,
+}: {
+  mobileOpen?: boolean
+  onMobileOpenChange?: (open: boolean) => void
+}) {
   return (
     <>
       {/* Desktop sidebar */}
@@ -198,20 +202,14 @@ export default function Sidebar() {
         <>
           <div
             className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm lg:hidden"
-            onClick={() => setMobileOpen(false)}
+            onClick={() => onMobileOpenChange?.(false)}
             aria-hidden="true"
           />
           <aside className="fixed top-0 left-0 z-50 h-full w-[280px] shadow-xl lg:hidden">
-            <SidebarContent onClose={() => setMobileOpen(false)} />
+            <SidebarContent onClose={() => onMobileOpenChange?.(false)} />
           </aside>
         </>
       )}
     </>
   )
-}
-
-// Export the trigger so Header can mount it
-export function SidebarMobileTrigger() {
-  // This will be wired from Header via a shared context or prop drilling in the next file
-  return null
 }

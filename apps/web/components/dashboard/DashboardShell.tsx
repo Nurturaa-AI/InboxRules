@@ -1,45 +1,24 @@
-"use client";
+"use client"
 
-import { useState, useEffect } from "react";
-import Header from "./Header";
+import Header from "./Header"
 
 interface Props {
-  children: React.ReactNode;
-  onAddDomain?: () => void;
+  children: React.ReactNode
+  onAddDomain?: () => void
+  onMenuClick?: () => void
 }
 
-export default function DashboardShell({ children, onAddDomain }: Props) {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-
-  useEffect(() => {
-    const saved = localStorage.getItem("ir-theme") as "light" | "dark" | null;
-    if (saved) applyTheme(saved);
-  }, []);
-
-  function applyTheme(t: "light" | "dark") {
-    setTheme(t);
-    document.documentElement.classList.toggle("dark", t === "dark");
-    localStorage.setItem("ir-theme", t);
-  }
-
+export default function DashboardShell({
+  children,
+  onAddDomain,
+  onMenuClick,
+}: Props) {
   return (
-    <div className="flex flex-col flex-1 overflow-hidden min-w-0">
-      <Header
-        theme={theme}
-        onToggleTheme={() => applyTheme(theme === "light" ? "dark" : "light")}
-        onAddDomain={onAddDomain}
-      />
-      <main
-        className="flex-1 overflow-y-auto"
-        style={{
-          padding: 24,
-          display: "flex",
-          flexDirection: "column",
-          gap: 20,
-        }}
-      >
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <Header onAddDomain={onAddDomain} onMenuClick={onMenuClick} />
+      <main className="flex flex-1 flex-col gap-6 overflow-y-auto p-4 sm:p-6">
         {children}
       </main>
     </div>
-  );
+  )
 }
