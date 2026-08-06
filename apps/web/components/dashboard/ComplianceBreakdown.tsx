@@ -1,168 +1,116 @@
-"use client";
-const ITEMS = [
+"use client"
+
+import { FileText, KeyRound, ShieldCheck, MailCheck } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
+
+import { Card } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { cn, scoreToStatus } from "@/lib/utils"
+
+// NOTE: Placeholder — this widget runs on hardcoded sample data.
+// Phase 2: wire to a real compliance-summary endpoint or remove.
+const ITEMS: {
+  icon: LucideIcon
+  name: string
+  desc: string
+  pass: number
+  total: number
+}[] = [
   {
-    emoji: "📋",
+    icon: FileText,
     name: "SPF Records",
     desc: "Sender Policy Framework",
     pass: 9,
     total: 12,
-    color: "#0EA5E9",
-    bg: "rgba(14,165,233,0.1)",
   },
   {
-    emoji: "🔑",
+    icon: KeyRound,
     name: "DKIM Signatures",
     desc: "DomainKeys Identified Mail",
     pass: 10,
     total: 12,
-    color: "#8B5CF6",
-    bg: "rgba(139,92,246,0.1)",
   },
   {
-    emoji: "🛡️",
+    icon: ShieldCheck,
     name: "DMARC Policies",
     desc: "Domain-based Auth Reporting",
     pass: 7,
     total: 12,
-    color: "#10B981",
-    bg: "rgba(16,185,129,0.1)",
   },
   {
-    emoji: "📧",
+    icon: MailCheck,
     name: "One-Click Unsub",
     desc: "RFC 8058 compliance",
     pass: 5,
     total: 12,
-    color: "#F59E0B",
-    bg: "rgba(245,158,11,0.1)",
   },
-];
+]
+
+const STATUS_TEXT: Record<ReturnType<typeof scoreToStatus>, string> = {
+  success: "text-success",
+  warning: "text-warning",
+  danger: "text-danger",
+}
+
+const STATUS_BAR: Record<ReturnType<typeof scoreToStatus>, string> = {
+  success: "bg-success",
+  warning: "bg-warning",
+  danger: "bg-danger",
+}
 
 export default function ComplianceBreakdown() {
   return (
-    <div
-      style={{
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        borderRadius: 16,
-        overflow: "hidden",
-      }}
-    >
-      <div
-        className="flex items-center justify-between"
-        style={{
-          padding: "16px 20px",
-          borderBottom: "1px solid var(--border)",
-        }}
-      >
-        <div>
-          <h2 style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
+    <Card className="gap-0 overflow-hidden p-0">
+      <div className="flex items-center justify-between border-b border-border px-5 py-4">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold tracking-tight text-foreground">
             Compliance Breakdown
           </h2>
-          <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2 }}>
-            Across all monitored domains
-          </p>
+          <Badge variant="secondary" className="text-[10px]">
+            Sample data
+          </Badge>
         </div>
-        <span
-          style={{
-            fontSize: 12.5,
-            fontWeight: 600,
-            color: "#2563EB",
-            cursor: "pointer",
-          }}
-        >
-          Full report
-        </span>
       </div>
+
       {ITEMS.map((item) => {
-        const pct = Math.round((item.pass / item.total) * 100);
+        const pct = Math.round((item.pass / item.total) * 100)
+        const status = scoreToStatus(pct)
+        const Icon = item.icon
         return (
           <div
             key={item.name}
-            className="flex items-center gap-3"
-            style={{
-              padding: "14px 20px",
-              borderBottom: "1px solid var(--border)",
-              cursor: "pointer",
-              transition: "background 0.12s",
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLDivElement).style.background =
-                "var(--surface-2)";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLDivElement).style.background =
-                "transparent";
-            }}
+            className="flex items-center gap-3 border-b border-border px-5 py-3.5 last:border-b-0"
           >
-            <div
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: 10,
-                background: item.bg,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 17,
-                flexShrink: 0,
-              }}
-            >
-              {item.emoji}
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground">
+              <Icon className="size-4" />
             </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="flex items-center justify-between">
-                <p
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: "var(--text)",
-                  }}
-                >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-foreground">
                   {item.name}
                 </p>
                 <span
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 700,
-                    fontFamily: "var(--font-mono)",
-                    color: item.color,
-                  }}
+                  className={cn(
+                    "font-mono text-xs font-semibold tabular-nums",
+                    STATUS_TEXT[status]
+                  )}
                 >
                   {item.pass}/{item.total}
                 </span>
               </div>
-              <p
-                style={{
-                  fontSize: 11.5,
-                  color: "var(--text-3)",
-                  marginTop: 2,
-                  marginBottom: 6,
-                }}
-              >
+              <p className="mt-0.5 mb-1.5 text-xs text-muted-foreground">
                 {item.desc}
               </p>
-              <div
-                style={{
-                  height: 4,
-                  background: "var(--border)",
-                  borderRadius: 999,
-                  overflow: "hidden",
-                }}
-              >
+              <div className="h-1 overflow-hidden rounded-full bg-border">
                 <div
-                  style={{
-                    width: `${pct}%`,
-                    height: "100%",
-                    background: item.color,
-                    borderRadius: 999,
-                  }}
+                  className={cn("h-full rounded-full", STATUS_BAR[status])}
+                  style={{ width: `${pct}%` }}
                 />
               </div>
             </div>
           </div>
-        );
+        )
       })}
-    </div>
-  );
+    </Card>
+  )
 }

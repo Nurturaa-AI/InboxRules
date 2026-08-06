@@ -1,665 +1,356 @@
-"use client";
+"use client"
 
-import { useState, useCallback } from "react";
-import { RefreshCw, ExternalLink, Trash2, Plus } from "lucide-react";
-import { useAuth } from "@clerk/nextjs";
-import { domainInitials, scoreColor } from "@/lib/utils";
+import { useState, useEffect, useCallback } from "react"
+import {
+  RefreshCw,
+  ExternalLink,
+  Trash2,
+  Plus,
+  Globe,
+  Search as SearchIcon,
+} from "lucide-react"
+import { useAuth } from "@clerk/nextjs"
 
-// ── Types ──
+import { domainInitials, timeAgo } from "@/lib/utils"
+import { Card } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { DataTable, type DataTableColumn } from "@/components/shared/DataTable"
+import { HealthScore } from "@/components/shared/HealthScore"
+import { StatusBadge, statusFromString } from "@/components/shared/StatusBadge"
+import { FilterBar } from "@/components/shared/FilterBar"
+import { EmptyState } from "@/components/shared/EmptyState"
+import { ActionMenu } from "@/components/shared/ActionMenu"
+import { LoadingSkeleton } from "@/components/shared/LoadingSkeleton"
+import { ConfirmationDialog } from "@/components/shared/ConfirmationDialog"
+
 interface Domain {
-  id: string;
-  domain: string;
-  detectedEsp: string | null;
-  healthScore: number;
-  spfStatus: string;
-  dkimStatus: string;
-  dmarcStatus: string;
-  lastCheckedAt: string | null;
-  createdAt: string;
+  id: string
+  domain: string
+  detectedEsp: string | null
+  healthScore: number
+  spfStatus: string
+  dkimStatus: string
+  dmarcStatus: string
+  lastCheckedAt: string | null
+  createdAt: string
 }
 
 interface Props {
-  onAddDomain?: () => void;
+  onAddDomain?: () => void
 }
 
-type Filter = "all" | "healthy" | "warning" | "critical";
+type Filter = "all" | "healthy" | "warning" | "critical"
 
-// ── Sub-components ──
-function ScoreBar({ score }: { score: number }) {
-  const color = scoreColor(score);
+const FILTERS: { value: Filter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "healthy", label: "Healthy" },
+  { value: "warning", label: "Warning" },
+  { value: "critical", label: "Critical" },
+]
+
+const STATUS_LABELS: Record<string, string> = {
+  pass: "Pass",
+  fail: "Fail",
+  warn: "Warn",
+  softfail: "Soft",
+  none: "None",
+  unknown: "—",
+  missing: "Missing",
+}
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4500"
+
+function AuthPill({ status }: { status: string }) {
   return (
-    <div className="flex items-center gap-2.5">
-      <span
-        style={{
-          fontSize: 13,
-          fontWeight: 700,
-          fontFamily: "var(--font-mono)",
-          color,
-          width: 26,
-          flexShrink: 0,
-        }}
-      >
-        {score}
-      </span>
-      <div
-        style={{
-          flex: 1,
-          height: 5,
-          background: "var(--border)",
-          borderRadius: 999,
-          overflow: "hidden",
-          minWidth: 55,
-        }}
-      >
-        <div
-          style={{
-            width: `${score}%`,
-            height: "100%",
-            background: color,
-            borderRadius: 999,
-          }}
-        />
-      </div>
-    </div>
-  );
+    <StatusBadge
+      status={statusFromString(status)}
+      label={STATUS_LABELS[status] ?? status}
+    />
+  )
 }
-
-function Pill({ status }: { status: string }) {
-  const map: Record<string, { bg: string; color: string }> = {
-    pass: { bg: "rgba(16,185,129,0.12)", color: "#10B981" },
-    fail: { bg: "rgba(239,68,68,0.12)", color: "#EF4444" },
-    warn: { bg: "rgba(245,158,11,0.12)", color: "#F59E0B" },
-    softfail: { bg: "rgba(245,158,11,0.12)", color: "#F59E0B" },
-    none: { bg: "var(--surface-2)", color: "var(--text-3)" },
-    unknown: { bg: "var(--surface-2)", color: "var(--text-3)" },
-    missing: { bg: "rgba(239,68,68,0.12)", color: "#EF4444" },
-  };
-  const labels: Record<string, string> = {
-    pass: "Pass",
-    fail: "Fail",
-    warn: "Warn",
-    softfail: "Soft",
-    none: "None",
-    unknown: "—",
-    missing: "Missing",
-  };
-  const s = map[status] ?? map.none;
-  return (
-    <span
-      className="inline-flex items-center gap-1.5"
-      style={{
-        padding: "4px 10px",
-        borderRadius: 999,
-        fontSize: 11.5,
-        fontWeight: 600,
-        background: s.bg,
-        color: s.color,
-      }}
-    >
-      <span
-        style={{
-          width: 5,
-          height: 5,
-          borderRadius: "50%",
-          background: "currentColor",
-          flexShrink: 0,
-        }}
-      />
-      {labels[status] ?? status}
-    </span>
-  );
-}
-
-// ── Relative time helper ──
-function timeAgo(dateStr: string | null): string {
-  if (!dateStr) return "Never";
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
-
-const FILTERS: Filter[] = ["all", "healthy", "warning", "critical"];
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4500";
 
 export default function DomainTable({ onAddDomain }: Props) {
-  const { getToken } = useAuth();
+  const { getToken } = useAuth()
 
-  const [domains, setDomains] = useState<Domain[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>("all");
-  const [scanning, setScanning] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
+  const [domains, setDomains] = useState<Domain[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [filter, setFilter] = useState<Filter>("all")
+  const [scanning, setScanning] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<Domain | null>(null)
 
   const fetchDomains = useCallback(async () => {
     try {
-      setLoading(true);
-      setError(null);
+      setLoading(true)
+      setError(null)
 
-      const token = await getToken();
+      const token = await getToken()
       const response = await fetch(`${API_URL}/api/v1/domains`, {
         headers: { Authorization: `Bearer ${token}` },
-      });
+      })
 
-      if (!response.ok) throw new Error("Failed to fetch domains");
+      if (!response.ok) throw new Error("Failed to fetch domains")
 
-      const data = await response.json();
-      setDomains(data.data || []);
+      const data = await response.json()
+      setDomains(data.data || [])
     } catch (err: unknown) {
-      setError((err as Error).message);
+      setError((err as Error).message)
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  }, [getToken]);
+  }, [getToken])
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchDomains())
+  }, [fetchDomains])
 
   // Trigger a manual scan
   async function handleScan(id: string) {
-    setScanning(id);
+    setScanning(id)
     try {
-      const token = await getToken();
+      const token = await getToken()
       await fetch(`${API_URL}/api/v1/domains/${id}/scan`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
-      });
+      })
       // Refresh after 3 seconds to show updated score
       setTimeout(() => {
-        fetchDomains();
-        setScanning(null);
-      }, 3000);
+        fetchDomains()
+        setScanning(null)
+      }, 3000)
     } catch {
-      setScanning(null);
+      setScanning(null)
     }
   }
 
-  // Delete a domain
-  async function handleDelete(id: string, domainName: string) {
-    if (!confirm(`Remove ${domainName} from monitoring?`)) return;
-    setDeleting(id);
+  // Delete a domain (confirmation handled by ConfirmationDialog)
+  async function handleDelete(domain: Domain) {
+    setDeleting(domain.id)
     try {
-      const token = await getToken();
-      await fetch(`${API_URL}/api/v1/domains/${id}`, {
+      const token = await getToken()
+      await fetch(`${API_URL}/api/v1/domains/${domain.id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
-      });
-      setDomains((prev) => prev.filter((d) => d.id !== id));
+      })
+      setDomains((prev) => prev.filter((d) => d.id !== domain.id))
     } catch {
-      alert("Failed to delete domain");
+      // surface a lightweight error; a toast system lands in Phase 2
+      setError("Failed to delete domain")
     } finally {
-      setDeleting(null);
+      setDeleting(null)
     }
   }
 
   // Filter domains
   const filtered = domains.filter((d) => {
-    if (filter === "healthy") return d.healthScore >= 80;
-    if (filter === "warning") return d.healthScore >= 50 && d.healthScore < 80;
-    if (filter === "critical") return d.healthScore < 50;
-    return true;
-  });
+    if (filter === "healthy") return d.healthScore >= 80
+    if (filter === "warning") return d.healthScore >= 60 && d.healthScore < 80
+    if (filter === "critical") return d.healthScore < 60
+    return true
+  })
+
+  const columns: DataTableColumn<Domain>[] = [
+    {
+      key: "domain",
+      header: "Domain",
+      cell: (d) => (
+        <div className="flex items-center gap-3">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-muted font-mono text-xs font-bold text-muted-foreground">
+            {domainInitials(d.domain)}
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-foreground">
+              {d.domain}
+            </p>
+            <p className="truncate font-mono text-xs text-muted-foreground">
+              {d.detectedEsp || "ESP detecting…"}
+            </p>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "health",
+      header: "Health Score",
+      className: "w-40",
+      cell: (d) => <HealthScore score={d.healthScore} size="sm" />,
+    },
+    {
+      key: "spf",
+      header: "SPF",
+      cell: (d) => <AuthPill status={d.spfStatus} />,
+    },
+    {
+      key: "dkim",
+      header: "DKIM",
+      cell: (d) => <AuthPill status={d.dkimStatus} />,
+    },
+    {
+      key: "dmarc",
+      header: "DMARC",
+      cell: (d) => <AuthPill status={d.dmarcStatus} />,
+    },
+    {
+      key: "lastChecked",
+      header: "Last Checked",
+      cell: (d) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {timeAgo(d.lastCheckedAt)}
+        </span>
+      ),
+    },
+    {
+      key: "actions",
+      header: "",
+      className: "w-px text-right",
+      cell: (d) => (
+        <div className="flex items-center justify-end gap-1.5">
+          <Button
+            variant="secondary"
+            size="xs"
+            onClick={() => handleScan(d.id)}
+            disabled={scanning === d.id}
+          >
+            <RefreshCw className={scanning === d.id ? "animate-spin" : ""} />
+            {scanning === d.id ? "Scanning" : "Scan"}
+          </Button>
+          <ActionMenu
+            items={[
+              {
+                label: "Open site",
+                icon: ExternalLink,
+                onClick: () => window.open(`https://${d.domain}`, "_blank"),
+              },
+              {
+                label: "Remove domain",
+                icon: Trash2,
+                variant: "destructive",
+                disabled: deleting === d.id,
+                onClick: () => setPendingDelete(d),
+              },
+            ]}
+          />
+        </div>
+      ),
+    },
+  ]
 
   return (
-    <div
-      style={{
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
-        borderRadius: 16,
-        overflow: "hidden",
-      }}
-    >
+    <Card className="gap-0 overflow-hidden p-0">
       {/* Header */}
-      <div
-        className="flex items-center justify-between"
-        style={{
-          padding: "18px 22px",
-          borderBottom: "1px solid var(--border)",
-        }}
-      >
+      <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
         <div>
-          <h2 style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
+          <h2 className="text-sm font-semibold tracking-tight text-foreground">
             Monitored Domains
           </h2>
-          <p style={{ fontSize: 12.5, color: "var(--text-3)", marginTop: 3 }}>
+          <p className="text-xs text-muted-foreground">
             {loading
-              ? "Loading..."
+              ? "Loading…"
               : `${domains.length} domain${domains.length !== 1 ? "s" : ""} · real-time monitoring`}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Refresh button */}
-          <button
+          <Button
+            variant="outline"
+            size="icon-sm"
             onClick={fetchDomains}
-            style={{
-              width: 34,
-              height: 34,
-              borderRadius: 9,
-              border: "1px solid var(--border)",
-              background: "var(--surface-2)",
-              cursor: "pointer",
-              color: "var(--text-3)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-            title="Refresh"
+            aria-label="Refresh domains"
           >
-            <RefreshCw size={14} className={loading ? "spin" : ""} />
-          </button>
-
-          {/* Add domain */}
-          <button
-            onClick={onAddDomain}
-            className="flex items-center gap-1.5"
-            style={{
-              height: 34,
-              padding: "0 13px",
-              background: "linear-gradient(135deg, #2563EB, #7C3AED)",
-              color: "white",
-              border: "none",
-              borderRadius: 9,
-              fontSize: 12.5,
-              fontWeight: 600,
-              cursor: "pointer",
-              fontFamily: "var(--font-sans)",
-            }}
-          >
-            <Plus size={13} strokeWidth={2.5} />
+            <RefreshCw className={loading ? "animate-spin" : ""} />
+          </Button>
+          <Button size="sm" onClick={onAddDomain}>
+            <Plus strokeWidth={2.5} />
             Add Domain
-          </button>
+          </Button>
         </div>
       </div>
 
-      {/* Filter tabs */}
-      <div
-        className="flex items-center gap-2"
-        style={{
-          padding: "12px 22px",
-          borderBottom: "1px solid var(--border)",
-          background: "var(--surface-2)",
-        }}
-      >
-        {FILTERS.map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            style={{
-              padding: "5px 14px",
-              borderRadius: 999,
-              fontSize: 12.5,
-              fontWeight: 600,
-              cursor: "pointer",
-              border: "none",
-              fontFamily: "var(--font-sans)",
-              textTransform: "capitalize",
-              transition: "all 0.15s",
-              background:
-                filter === f
-                  ? "linear-gradient(135deg, #2563EB, #7C3AED)"
-                  : "var(--surface)",
-              color: filter === f ? "white" : "var(--text-2)",
-              outline: filter !== f ? "1px solid var(--border)" : "none",
-            }}
-          >
-            {f}
-          </button>
-        ))}
-        <span
-          style={{
-            marginLeft: "auto",
-            fontSize: 12,
-            color: "var(--text-3)",
-            fontFamily: "var(--font-mono)",
-          }}
-        >
-          {filtered.length} result{filtered.length !== 1 ? "s" : ""}
-        </span>
-      </div>
-
-      {/* Table body */}
-      {loading ? (
-        // Loading skeleton
-        <div style={{ padding: 40, textAlign: "center" }}>
-          <RefreshCw
-            size={24}
-            color="var(--text-3)"
-            className="spin"
-            style={{ margin: "0 auto" }}
+      {/* Filter bar */}
+      {!loading && !error && domains.length > 0 && (
+        <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-2.5 sm:px-5">
+          <FilterBar
+            options={FILTERS}
+            value={filter}
+            onValueChange={setFilter}
+            aria-label="Filter domains by health"
           />
-          <p style={{ fontSize: 13, color: "var(--text-3)", marginTop: 12 }}>
-            Loading domains...
-          </p>
-        </div>
-      ) : error ? (
-        // Error state
-        <div style={{ padding: 40, textAlign: "center" }}>
-          <p style={{ fontSize: 14, color: "#EF4444", fontWeight: 600 }}>
-            Failed to load domains
-          </p>
-          <p style={{ fontSize: 12.5, color: "var(--text-3)", marginTop: 6 }}>
-            {error}
-          </p>
-          <button
-            onClick={fetchDomains}
-            style={{
-              marginTop: 16,
-              padding: "8px 16px",
-              background: "linear-gradient(135deg, #2563EB, #7C3AED)",
-              color: "white",
-              border: "none",
-              borderRadius: 9,
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            Try Again
-          </button>
-        </div>
-      ) : filtered.length === 0 ? (
-        // Empty state
-        <div style={{ padding: 60, textAlign: "center" }}>
-          <p style={{ fontSize: 32, marginBottom: 12 }}>🌐</p>
-          <p style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
-            {domains.length === 0
-              ? "No domains yet"
-              : "No domains match this filter"}
-          </p>
-          <p style={{ fontSize: 13, color: "var(--text-3)", marginTop: 6 }}>
-            {domains.length === 0
-              ? "Add your first domain to start monitoring"
-              : "Try a different filter"}
-          </p>
-          {domains.length === 0 && (
-            <button
-              onClick={onAddDomain}
-              style={{
-                marginTop: 20,
-                padding: "10px 20px",
-                background: "linear-gradient(135deg, #2563EB, #7C3AED)",
-                color: "white",
-                border: "none",
-                borderRadius: 10,
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              + Add Your First Domain
-            </button>
-          )}
-        </div>
-      ) : (
-        // Table
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr
-                style={{
-                  borderBottom: "1px solid var(--border)",
-                  background: "var(--surface-2)",
-                }}
-              >
-                {[
-                  "Domain",
-                  "Health Score",
-                  "SPF",
-                  "DKIM",
-                  "DMARC",
-                  "Last Checked",
-                  "Actions",
-                ].map((h) => (
-                  <th
-                    key={h}
-                    style={{
-                      textAlign: "left",
-                      padding: "11px 22px",
-                      fontSize: 11,
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.07em",
-                      color: "var(--text-3)",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((d) => (
-                <tr
-                  key={d.id}
-                  style={{
-                    borderBottom: "1px solid var(--border)",
-                    transition: "background 0.12s",
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLTableRowElement).style.background =
-                      "var(--surface-2)";
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLTableRowElement).style.background =
-                      "transparent";
-                  }}
-                >
-                  {/* Domain */}
-                  <td style={{ padding: "15px 22px" }}>
-                    <div className="flex items-center gap-3">
-                      <div
-                        style={{
-                          width: 34,
-                          height: 34,
-                          borderRadius: 9,
-                          background: "var(--surface-2)",
-                          border: "1px solid var(--border)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: "var(--text-3)",
-                          fontFamily: "var(--font-mono)",
-                          flexShrink: 0,
-                        }}
-                      >
-                        {domainInitials(d.domain)}
-                      </div>
-                      <div>
-                        <p
-                          style={{
-                            fontWeight: 600,
-                            fontSize: 13.5,
-                            color: "var(--text)",
-                          }}
-                        >
-                          {d.domain}
-                        </p>
-                        <p
-                          style={{
-                            fontSize: 11.5,
-                            color: "var(--text-3)",
-                            fontFamily: "var(--font-mono)",
-                            marginTop: 2,
-                          }}
-                        >
-                          {d.detectedEsp || "ESP detecting..."}
-                        </p>
-                      </div>
-                    </div>
-                  </td>
-
-                  {/* Score */}
-                  <td style={{ padding: "15px 22px", minWidth: 140 }}>
-                    <ScoreBar score={d.healthScore} />
-                  </td>
-
-                  {/* Status pills */}
-                  <td style={{ padding: "15px 22px" }}>
-                    <Pill status={d.spfStatus} />
-                  </td>
-                  <td style={{ padding: "15px 22px" }}>
-                    <Pill status={d.dkimStatus} />
-                  </td>
-                  <td style={{ padding: "15px 22px" }}>
-                    <Pill status={d.dmarcStatus} />
-                  </td>
-
-                  {/* Last checked */}
-                  <td style={{ padding: "15px 22px" }}>
-                    <span
-                      style={{
-                        fontSize: 12.5,
-                        color: "var(--text-3)",
-                        fontFamily: "var(--font-mono)",
-                      }}
-                    >
-                      {timeAgo(d.lastCheckedAt)}
-                    </span>
-                  </td>
-
-                  {/* Actions */}
-                  <td style={{ padding: "15px 22px" }}>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => handleScan(d.id)}
-                        className="flex items-center gap-1.5"
-                        style={{
-                          padding: "5px 11px",
-                          borderRadius: 8,
-                          fontSize: 12,
-                          fontWeight: 600,
-                          cursor: "pointer",
-                          border: "none",
-                          fontFamily: "var(--font-sans)",
-                          background: "rgba(37,99,235,0.1)",
-                          color: "#2563EB",
-                        }}
-                      >
-                        <RefreshCw
-                          size={11}
-                          strokeWidth={2.5}
-                          className={scanning === d.id ? "spin" : ""}
-                        />
-                        {scanning === d.id ? "Scanning" : "Scan"}
-                      </button>
-
-                      <button
-                        onClick={() =>
-                          window.open(`https://${d.domain}`, "_blank")
-                        }
-                        style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 7,
-                          border: "1px solid var(--border)",
-                          background: "var(--surface)",
-                          color: "var(--text-3)",
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                        title="Open domain"
-                      >
-                        <ExternalLink size={12} />
-                      </button>
-
-                      <button
-                        onClick={() => handleDelete(d.id, d.domain)}
-                        disabled={deleting === d.id}
-                        style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 7,
-                          border: "1px solid var(--border)",
-                          background: "var(--surface)",
-                          color: "var(--text-3)",
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                        title="Remove domain"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <span className="font-mono text-xs text-muted-foreground">
+            {filtered.length} result{filtered.length !== 1 ? "s" : ""}
+          </span>
         </div>
       )}
+
+      {/* Body */}
+      <div className="p-4 sm:p-5">
+        {loading ? (
+          <LoadingSkeleton variant="table" count={4} />
+        ) : error ? (
+          <EmptyState
+            icon={Globe}
+            title="Failed to load domains"
+            description={error}
+            action={
+              <Button variant="outline" size="sm" onClick={fetchDomains}>
+                <RefreshCw />
+                Try again
+              </Button>
+            }
+          />
+        ) : domains.length === 0 ? (
+          <EmptyState
+            icon={Globe}
+            title="No domains yet"
+            description="Add your first domain to start monitoring SPF, DKIM, and DMARC compliance."
+            action={
+              <Button size="sm" onClick={onAddDomain}>
+                <Plus strokeWidth={2.5} />
+                Add your first domain
+              </Button>
+            }
+          />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={SearchIcon}
+            size="sm"
+            title="No domains match this filter"
+            description="Try a different filter to see more domains."
+          />
+        ) : (
+          <DataTable
+            columns={columns}
+            data={filtered}
+            getRowKey={(d) => d.id}
+          />
+        )}
+      </div>
 
       {/* Footer */}
       {!loading && !error && filtered.length > 0 && (
-        <div
-          className="flex items-center justify-between"
-          style={{
-            padding: "13px 22px",
-            borderTop: "1px solid var(--border)",
-            background: "var(--surface-2)",
-          }}
-        >
-          <span style={{ fontSize: 12.5, color: "var(--text-3)" }}>
+        <div className="flex items-center justify-between border-t border-border bg-muted/30 px-4 py-3 sm:px-5">
+          <span className="text-xs text-muted-foreground">
             Showing {filtered.length} of {domains.length} domains
           </span>
-          <div className="flex items-center gap-1.5">
-            <button
-              style={{
-                height: 30,
-                padding: "0 12px",
-                borderRadius: 8,
-                border: "1px solid var(--border)",
-                background: "var(--surface)",
-                color: "var(--text-2)",
-                fontSize: 12.5,
-                fontWeight: 600,
-                cursor: "pointer",
-                fontFamily: "var(--font-sans)",
-              }}
-            >
-              ← Previous
-            </button>
-            <button
-              style={{
-                width: 30,
-                height: 30,
-                borderRadius: 8,
-                border: "none",
-                background: "linear-gradient(135deg, #2563EB, #7C3AED)",
-                color: "white",
-                fontSize: 12.5,
-                fontWeight: 600,
-                cursor: "pointer",
-              }}
-            >
-              1
-            </button>
-            <button
-              style={{
-                height: 30,
-                padding: "0 12px",
-                borderRadius: 8,
-                border: "1px solid var(--border)",
-                background: "var(--surface)",
-                color: "var(--text-2)",
-                fontSize: 12.5,
-                fontWeight: 600,
-                cursor: "pointer",
-                fontFamily: "var(--font-sans)",
-              }}
-            >
-              Next →
-            </button>
-          </div>
         </div>
       )}
-    </div>
-  );
+
+      <ConfirmationDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null)
+        }}
+        title="Remove domain?"
+        description={
+          pendingDelete
+            ? `${pendingDelete.domain} will be removed from monitoring. This can't be undone.`
+            : ""
+        }
+        actionLabel="Remove"
+        variant="destructive"
+        onConfirm={() => {
+          if (pendingDelete) handleDelete(pendingDelete)
+        }}
+      />
+    </Card>
+  )
 }
