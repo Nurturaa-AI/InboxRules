@@ -74,6 +74,10 @@ const CHANGE_LABELS: Record<string, string> = {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4500"
 
+// Stable no-op subscribe for the mounted flag — the value never changes after
+// the initial client render, so there's nothing to subscribe to.
+const subscribeNoop = () => () => {}
+
 export default function Header({ onAddDomain, onMenuClick }: Props) {
   const pathname = usePathname()
   const { getToken } = useAuth()
@@ -83,6 +87,16 @@ export default function Header({ onAddDomain, onMenuClick }: Props) {
   const [search, setSearch] = React.useState("")
   const [notifications, setNotifications] = React.useState<AlertNotification[]>([])
   const [notifLoading, setNotifLoading] = React.useState(false)
+
+  // next-themes can't know the theme during SSR, so `resolvedTheme` is undefined
+  // on the server and on the first client render. This hydration-safe flag reads
+  // false on the server + first client render (matching the server HTML) and true
+  // afterward, so the theme-dependent aria-label never triggers a mismatch.
+  const mounted = React.useSyncExternalStore(
+    subscribeNoop,
+    () => true,
+    () => false,
+  )
 
   // Fetch unresolved alerts once on mount so the dot reflects real unread count.
   React.useEffect(() => {
@@ -155,7 +169,13 @@ export default function Header({ onAddDomain, onMenuClick }: Props) {
           variant="outline"
           size="icon-sm"
           onClick={() => setTheme(isDark ? "light" : "dark")}
-          aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+          aria-label={
+            mounted
+              ? isDark
+                ? "Switch to light mode"
+                : "Switch to dark mode"
+              : "Toggle theme"
+          }
         >
           <Sun className="hidden dark:block" />
           <Moon className="dark:hidden" />
