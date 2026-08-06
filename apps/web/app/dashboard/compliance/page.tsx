@@ -1,741 +1,402 @@
-"use client";
+"use client"
 
-import { useState } from "react";
+import { useState } from "react"
 import {
   CheckCircle,
   XCircle,
-  AlertCircle,
   ChevronDown,
-  ChevronUp,
-} from "lucide-react";
-import { useApiQuery } from "@/lib/useApiQuery";
-import { RefreshCw } from "lucide-react";
+  RefreshCw,
+  ShieldCheck,
+  ShieldAlert,
+  ShieldX,
+  LayoutGrid,
+  Shield,
+} from "lucide-react"
+
+import { useApiQuery } from "@/lib/useApiQuery"
+import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
+import { PageHeader } from "@/components/shared/PageHeader"
+import { MetricCard } from "@/components/shared/MetricCard"
+import { HealthScore } from "@/components/shared/HealthScore"
+import { AuthStatusBadge } from "@/components/shared/AuthStatusBadge"
+import { DomainAvatar } from "@/components/shared/DomainAvatar"
+import { StatusBadge, statusFromString } from "@/components/shared/StatusBadge"
+import { EmptyState } from "@/components/shared/EmptyState"
+import { LoadingSkeleton } from "@/components/shared/LoadingSkeleton"
+
+interface DkimSelector {
+  selector: string
+  keyBits?: number
+  valid?: boolean
+}
 
 interface Domain {
-  id: string;
-  domain: string;
-  unsubStatus?: "active" | "inactive" | null;
-  detectedEsp: string | null;
-  healthScore: number;
-  spfStatus: string;
-  dkimStatus: string;
-  dmarcStatus: string;
+  id: string
+  domain: string
+  unsubStatus?: "active" | "inactive" | null
+  detectedEsp: string | null
+  healthScore: number
+  spfStatus: string
+  dkimStatus: string
+  dmarcStatus: string
   snapshots: Array<{
-    spfRecord: string | null;
-    spfLookupCount: number | null;
-    spfResult: string | null;
-    dkimSelectors: unknown;
-    dmarcRecord: string | null;
-    dmarcPolicy: string | null;
-    dmarcPct: number | null;
-    dmarcResult?: string | null;
-    overallScore: number;
-  }>;
+    spfRecord: string | null
+    spfLookupCount: number | null
+    spfResult: string | null
+    dkimSelectors: unknown
+    dmarcRecord: string | null
+    dmarcPolicy: string | null
+    dmarcPct: number | null
+    dmarcResult?: string | null
+    overallScore: number
+  }>
 }
 
-function StatusIcon({ status }: { status: string }) {
-  if (status === "pass") return <CheckCircle size={14} color="#10B981" />;
-  if (status === "fail" || status === "none" || status === "missing")
-    return <XCircle size={14} color="#EF4444" />;
-  return <AlertCircle size={14} color="#F59E0B" />;
+/** Small status icon paired with a label (never color-only). */
+function CheckIcon({ status }: { status: string }) {
+  const kind = statusFromString(status)
+  if (kind === "success")
+    return <CheckCircle className="size-3.5 text-success" aria-label="Pass" />
+  if (kind === "danger" || kind === "neutral")
+    return <XCircle className="size-3.5 text-danger" aria-label="Fail" />
+  return <ShieldAlert className="size-3.5 text-warning" aria-label="Warning" />
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, { bg: string; color: string }> = {
-    pass: { bg: "rgba(16,185,129,0.1)", color: "#10B981" },
-    fail: { bg: "rgba(239,68,68,0.1)", color: "#EF4444" },
-    warn: { bg: "rgba(245,158,11,0.1)", color: "#F59E0B" },
-    softfail: { bg: "rgba(245,158,11,0.1)", color: "#F59E0B" },
-    none: { bg: "var(--surface-2)", color: "var(--text-3)" },
-    missing: { bg: "rgba(239,68,68,0.1)", color: "#EF4444" },
-    unknown: { bg: "var(--surface-2)", color: "var(--text-3)" },
-  };
-  const labels: Record<string, string> = {
-    pass: "Pass",
-    fail: "Fail",
-    warn: "Warn",
-    softfail: "Soft",
-    none: "None",
-    missing: "Missing",
-    unknown: "Unknown",
-  };
-  const s = styles[status] ?? styles.unknown;
+/** A labeled record block inside the expanded detail. */
+function DetailBlock({
+  title,
+  status,
+  children,
+}: {
+  title: string
+  status: string
+  children: React.ReactNode
+}) {
   return (
-    <span
-      className="inline-flex items-center gap-1.5"
-      style={{
-        padding: "4px 10px",
-        borderRadius: 999,
-        fontSize: 12,
-        fontWeight: 600,
-        background: s.bg,
-        color: s.color,
-      }}
-    >
-      <StatusIcon status={status} />
-      {labels[status] ?? status}
-    </span>
-  );
+    <div className="rounded-xl border border-border bg-muted/40 p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <CheckIcon status={status} />
+        <p className="text-sm font-semibold text-foreground">{title}</p>
+      </div>
+      {children}
+    </div>
+  )
 }
 
 export default function CompliancePage() {
   const { data, loading, error, refetch } = useApiQuery<Domain[]>(
-    "/domains?limit=100&include=snapshots,changeEvents",
-  );
-  const [expanded, setExpanded] = useState<string | null>(null);
+    "/domains?limit=100&include=snapshots,changeEvents"
+  )
+  const [expanded, setExpanded] = useState<string | null>(null)
 
-  const domains = data || [];
-  const compliant = domains.filter((d) => d.healthScore >= 80).length;
+  const domains = data || []
+  // Canonical thresholds (shared with HealthScore): ≥80 healthy, ≥60 warning, <60 critical.
+  const compliant = domains.filter((d) => d.healthScore >= 80).length
   const warning = domains.filter(
-    (d) => d.healthScore >= 50 && d.healthScore < 80,
-  ).length;
-  const critical = domains.filter((d) => d.healthScore < 50).length;
+    (d) => d.healthScore >= 60 && d.healthScore < 80
+  ).length
+  const critical = domains.filter((d) => d.healthScore < 60).length
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1
-            style={{
-              fontSize: 22,
-              fontWeight: 800,
-              color: "var(--text)",
-              letterSpacing: "-0.4px",
-            }}
+    <div className="space-y-6">
+      <PageHeader
+        title="Compliance"
+        description="SPF, DKIM, DMARC, and unsubscribe status for every domain"
+        action={
+          <Button
+            variant="outline"
+            size="icon-sm"
+            onClick={refetch}
+            aria-label="Refresh compliance data"
           >
-            Compliance
-          </h1>
-          <p style={{ fontSize: 13, color: "var(--text-3)", marginTop: 4 }}>
-            SPF, DKIM, DMARC, and unsubscribe status for every domain
-          </p>
-        </div>
-        <button
-          onClick={refetch}
-          style={{
-            width: 36,
-            height: 36,
-            borderRadius: 9,
-            border: "1px solid var(--border)",
-            background: "var(--surface-2)",
-            cursor: "pointer",
-            color: "var(--text-3)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <RefreshCw size={14} className={loading ? "spin" : ""} />
-        </button>
-      </div>
+            <RefreshCw className={loading ? "animate-spin" : ""} />
+          </Button>
+        }
+      />
 
       {/* Summary */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
-          gap: 14,
-        }}
-      >
-        {[
-          {
-            label: "Total",
-            value: domains.length,
-            color: "#2563EB",
-            bg: "rgba(37,99,235,0.1)",
-          },
-          {
-            label: "Compliant",
-            value: compliant,
-            color: "#10B981",
-            bg: "rgba(16,185,129,0.1)",
-          },
-          {
-            label: "Warning",
-            value: warning,
-            color: "#F59E0B",
-            bg: "rgba(245,158,11,0.1)",
-          },
-          {
-            label: "Critical",
-            value: critical,
-            color: "#EF4444",
-            bg: "rgba(239,68,68,0.1)",
-          },
-        ].map((item) => (
-          <div
-            key={item.label}
-            style={{
-              background: "var(--surface)",
-              border: "1px solid var(--border)",
-              borderRadius: 14,
-              padding: "18px 20px",
-              display: "flex",
-              alignItems: "center",
-              gap: 14,
-            }}
-          >
-            <div
-              style={{
-                width: 46,
-                height: 46,
-                borderRadius: 12,
-                background: item.bg,
-                color: item.color,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 22,
-                fontWeight: 800,
-                fontFamily: "var(--font-mono)",
-              }}
-            >
-              {loading ? "—" : item.value}
-            </div>
-            <p
-              style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text)" }}
-            >
-              {item.label}
-            </p>
-          </div>
-        ))}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricCard
+          label="Total"
+          value={loading ? "—" : domains.length}
+          icon={LayoutGrid}
+        />
+        <MetricCard
+          label="Compliant"
+          value={loading ? "—" : compliant}
+          icon={ShieldCheck}
+          hint="Score ≥ 80"
+        />
+        <MetricCard
+          label="Warning"
+          value={loading ? "—" : warning}
+          icon={ShieldAlert}
+          hint="Score 60–79"
+        />
+        <MetricCard
+          label="Critical"
+          value={loading ? "—" : critical}
+          icon={ShieldX}
+          hint="Score < 60"
+        />
       </div>
 
-      {/* Loading / Error */}
-      {loading && (
-        <div style={{ padding: 60, textAlign: "center" }}>
-          <RefreshCw
-            size={24}
-            color="var(--text-3)"
-            className="spin"
-            style={{ margin: "0 auto" }}
+      {/* Body */}
+      {loading ? (
+        <Card className="p-5">
+          <LoadingSkeleton variant="table" count={5} />
+        </Card>
+      ) : error ? (
+        <Card className="p-5">
+          <EmptyState
+            icon={Shield}
+            title="Failed to load compliance data"
+            description={error}
+            action={
+              <Button variant="outline" size="sm" onClick={refetch}>
+                <RefreshCw />
+                Try again
+              </Button>
+            }
           />
-          <p style={{ fontSize: 13, color: "var(--text-3)", marginTop: 12 }}>
-            Loading compliance data...
-          </p>
-        </div>
-      )}
+        </Card>
+      ) : domains.length === 0 ? (
+        <Card className="p-5">
+          <EmptyState
+            icon={Shield}
+            title="No domains yet"
+            description="Add domains to see compliance details here."
+          />
+        </Card>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {domains.map((d) => {
+            const snap = d.snapshots?.[0]
+            const dkimSelectors: DkimSelector[] = Array.isArray(
+              snap?.dkimSelectors
+            )
+              ? (snap.dkimSelectors as DkimSelector[])
+              : []
+            const isExpanded = expanded === d.id
+            const panelId = `compliance-detail-${d.id}`
 
-      {error && (
-        <div style={{ padding: 40, textAlign: "center" }}>
-          <p style={{ fontSize: 14, color: "#EF4444", fontWeight: 600 }}>
-            Failed to load
-          </p>
-          <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 4 }}>
-            {error}
-          </p>
-          <button
-            onClick={refetch}
-            style={{
-              marginTop: 12,
-              padding: "8px 16px",
-              background: "#2563EB",
-              color: "white",
-              border: "none",
-              borderRadius: 9,
-              cursor: "pointer",
-              fontSize: 13,
-              fontWeight: 600,
-            }}
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
-      {/* Domain detail cards */}
-      {!loading && !error && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {domains.length === 0 ? (
-            <div
-              style={{
-                background: "var(--surface)",
-                border: "1px solid var(--border)",
-                borderRadius: 16,
-                padding: 60,
-                textAlign: "center",
-              }}
-            >
-              <p style={{ fontSize: 32, marginBottom: 12 }}>🛡️</p>
-              <p
-                style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}
-              >
-                No domains yet
-              </p>
-              <p style={{ fontSize: 13, color: "var(--text-3)", marginTop: 6 }}>
-                Add domains to see compliance details here
-              </p>
-            </div>
-          ) : (
-            domains.map((d) => {
-              const snap = d.snapshots?.[0];
-              const dkimSelectors = snap?.dkimSelectors
-                ? Array.isArray(snap.dkimSelectors)
-                  ? snap.dkimSelectors
-                  : []
-                : [];
-              const isExpanded = expanded === d.id;
-
-              return (
-                <div
-                  key={d.id}
-                  style={{
-                    background: "var(--surface)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 16,
-                    overflow: "hidden",
-                  }}
+            return (
+              <Card key={d.id} className="gap-0 overflow-hidden p-0">
+                {/* Row header (accessible disclosure trigger) */}
+                <button
+                  type="button"
+                  onClick={() => setExpanded(isExpanded ? null : d.id)}
+                  aria-expanded={isExpanded}
+                  aria-controls={panelId}
+                  className={cn(
+                    "flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none",
+                    isExpanded && "bg-muted/40"
+                  )}
                 >
-                  {/* Row header */}
-                  <div
-                    className="flex items-center gap-4"
-                    style={{
-                      padding: "16px 22px",
-                      cursor: "pointer",
-                      background: isExpanded
-                        ? "var(--surface-2)"
-                        : "var(--surface)",
-                      transition: "background 0.15s",
-                    }}
-                    onClick={() => setExpanded(isExpanded ? null : d.id)}
-                  >
-                    <div className="flex items-center gap-3 flex-1">
-                      <div
-                        style={{
-                          width: 36,
-                          height: 36,
-                          borderRadius: 9,
-                          background: "var(--surface-2)",
-                          border: "1px solid var(--border)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: "var(--text-3)",
-                          fontFamily: "var(--font-mono)",
-                        }}
-                      >
-                        {d.domain.substring(0, 2).toUpperCase()}
-                      </div>
-                      <div>
-                        <p
-                          style={{
-                            fontWeight: 700,
-                            fontSize: 14,
-                            color: "var(--text)",
-                          }}
-                        >
-                          {d.domain}
-                        </p>
-                        <p
-                          style={{
-                            fontSize: 11.5,
-                            color: "var(--text-3)",
-                            fontFamily: "var(--font-mono)",
-                            marginTop: 1,
-                          }}
-                        >
-                          {d.detectedEsp || "Unknown ESP"}
-                        </p>
-                      </div>
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <DomainAvatar domain={d.domain} size="sm" />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-foreground">
+                        {d.domain}
+                      </p>
+                      <p className="truncate font-mono text-xs text-muted-foreground">
+                        {d.detectedEsp || "Unknown ESP"}
+                      </p>
                     </div>
-
-                    <div className="flex items-center gap-2">
-                      <StatusBadge status={d.spfStatus} />
-                      <StatusBadge status={d.dkimStatus} />
-                      <StatusBadge status={d.dmarcStatus} />
-                    </div>
-
-                    <div
-                      style={{
-                        fontSize: 18,
-                        fontWeight: 800,
-                        fontFamily: "var(--font-mono)",
-                        color:
-                          d.healthScore >= 80
-                            ? "#10B981"
-                            : d.healthScore >= 50
-                              ? "#F59E0B"
-                              : "#EF4444",
-                        minWidth: 48,
-                        textAlign: "right",
-                      }}
-                    >
-                      {d.healthScore}
-                    </div>
-
-                    {isExpanded ? (
-                      <ChevronUp size={16} color="var(--text-3)" />
-                    ) : (
-                      <ChevronDown size={16} color="var(--text-3)" />
-                    )}
                   </div>
 
-                  {/* Expanded detail */}
-                  {isExpanded && (
-                    <div
-                      style={{
-                        padding: "20px 22px",
-                        borderTop: "1px solid var(--border)",
-                      }}
-                    >
-                      {!snap ? (
-                        <p
-                          style={{
-                            fontSize: 13,
-                            color: "var(--text-3)",
-                            textAlign: "center",
-                            padding: "20px 0",
-                          }}
-                        >
-                          No scan data yet. Click &quot;Scan&quot; on the domain
-                          to run a check.
-                        </p>
-                      ) : (
-                        <div
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "repeat(2, 1fr)",
-                            gap: 16,
-                          }}
-                        >
-                          {/* SPF */}
-                          <div
-                            style={{
-                              background: "var(--surface-2)",
-                              border: "1px solid var(--border)",
-                              borderRadius: 12,
-                              padding: 16,
-                            }}
-                          >
-                            <div
-                              className="flex items-center gap-2"
-                              style={{ marginBottom: 12 }}
-                            >
-                              <StatusIcon
-                                status={snap.spfResult || "unknown"}
-                              />
-                              <p
-                                style={{
-                                  fontSize: 13,
-                                  fontWeight: 700,
-                                  color: "var(--text)",
-                                }}
-                              >
-                                SPF Record
-                              </p>
-                            </div>
-                            {snap.spfRecord ? (
-                              <code
-                                style={{
-                                  display: "block",
-                                  fontSize: 11,
-                                  color: "var(--text-2)",
-                                  background: "var(--surface)",
-                                  border: "1px solid var(--border)",
-                                  borderRadius: 7,
-                                  padding: "8px 10px",
-                                  marginBottom: 10,
-                                  wordBreak: "break-all",
-                                  fontFamily: "var(--font-mono)",
-                                }}
-                              >
-                                {snap.spfRecord}
-                              </code>
-                            ) : (
-                              <p
-                                style={{
-                                  fontSize: 12.5,
-                                  color: "#EF4444",
-                                  marginBottom: 10,
-                                }}
-                              >
-                                No SPF record found
-                              </p>
-                            )}
-                            <div style={{ marginTop: 8 }}>
-                              <p
-                                style={{
-                                  fontSize: 11.5,
-                                  color: "var(--text-3)",
-                                  marginBottom: 4,
-                                }}
-                              >
-                                DNS Lookups
-                              </p>
-                              <div className="flex items-center gap-2">
-                                <div
-                                  style={{
-                                    flex: 1,
-                                    height: 5,
-                                    background: "var(--border)",
-                                    borderRadius: 999,
-                                    overflow: "hidden",
-                                  }}
-                                >
-                                  <div
-                                    style={{
-                                      width: `${((snap.spfLookupCount || 0) / 10) * 100}%`,
-                                      height: "100%",
-                                      borderRadius: 999,
-                                      background:
-                                        (snap.spfLookupCount || 0) >= 8
-                                          ? "#EF4444"
-                                          : (snap.spfLookupCount || 0) >= 6
-                                            ? "#F59E0B"
-                                            : "#10B981",
-                                    }}
-                                  />
-                                </div>
-                                <span
-                                  style={{
-                                    fontSize: 11.5,
-                                    fontFamily: "var(--font-mono)",
-                                    fontWeight: 700,
-                                    color:
-                                      (snap.spfLookupCount || 0) >= 8
-                                        ? "#EF4444"
-                                        : "#10B981",
-                                  }}
-                                >
-                                  {snap.spfLookupCount || 0}/10
-                                </span>
-                              </div>
-                            </div>
-                          </div>
+                  <div className="hidden items-center gap-2 md:flex">
+                    <AuthStatusBadge status={d.spfStatus} />
+                    <AuthStatusBadge status={d.dkimStatus} />
+                    <AuthStatusBadge status={d.dmarcStatus} />
+                  </div>
 
-                          {/* DKIM */}
-                          <div
-                            style={{
-                              background: "var(--surface-2)",
-                              border: "1px solid var(--border)",
-                              borderRadius: 12,
-                              padding: 16,
-                            }}
-                          >
-                            <div
-                              className="flex items-center gap-2"
-                              style={{ marginBottom: 12 }}
-                            >
-                              <StatusIcon status={d.dkimStatus} />
-                              <p
+                  <HealthScore
+                    score={d.healthScore}
+                    variant="text"
+                    className="min-w-[2.5rem] text-right text-lg"
+                  />
+
+                  <ChevronDown
+                    className={cn(
+                      "size-4 shrink-0 text-muted-foreground transition-transform",
+                      isExpanded && "rotate-180"
+                    )}
+                    aria-hidden="true"
+                  />
+                </button>
+
+                {/* Expanded detail */}
+                {isExpanded && (
+                  <div
+                    id={panelId}
+                    className="border-t border-border p-5"
+                  >
+                    {/* Compact auth badges on mobile (hidden in header) */}
+                    <div className="mb-4 flex flex-wrap items-center gap-2 md:hidden">
+                      <AuthStatusBadge status={d.spfStatus} />
+                      <AuthStatusBadge status={d.dkimStatus} />
+                      <AuthStatusBadge status={d.dmarcStatus} />
+                    </div>
+
+                    {!snap ? (
+                      <p className="py-5 text-center text-sm text-muted-foreground">
+                        No scan data yet. Click &quot;Scan&quot; on the domain to
+                        run a check.
+                      </p>
+                    ) : (
+                      <div className="grid gap-4 md:grid-cols-2">
+                        {/* SPF */}
+                        <DetailBlock
+                          title="SPF Record"
+                          status={snap.spfResult || "unknown"}
+                        >
+                          {snap.spfRecord ? (
+                            <code className="mb-2.5 block rounded-md border border-border bg-card px-2.5 py-2 font-mono text-xs break-all text-muted-foreground">
+                              {snap.spfRecord}
+                            </code>
+                          ) : (
+                            <p className="mb-2.5 text-xs text-danger">
+                              No SPF record found
+                            </p>
+                          )}
+                          <p className="mb-1 text-xs text-muted-foreground">
+                            DNS Lookups
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                              <div
+                                className={cn(
+                                  "h-full rounded-full",
+                                  (snap.spfLookupCount || 0) >= 8
+                                    ? "bg-danger"
+                                    : (snap.spfLookupCount || 0) >= 6
+                                      ? "bg-warning"
+                                      : "bg-success"
+                                )}
                                 style={{
-                                  fontSize: 13,
-                                  fontWeight: 700,
-                                  color: "var(--text)",
+                                  width: `${Math.min(100, ((snap.spfLookupCount || 0) / 10) * 100)}%`,
                                 }}
-                              >
-                                DKIM Selectors
-                              </p>
+                              />
                             </div>
-                            {dkimSelectors.length === 0 ? (
-                              <p style={{ fontSize: 12.5, color: "#EF4444" }}>
-                                No DKIM selectors found
-                              </p>
-                            ) : (
-                              dkimSelectors.map((sel, i: number) => (
-                                <div
+                            <span
+                              className={cn(
+                                "font-mono text-xs font-semibold",
+                                (snap.spfLookupCount || 0) >= 8
+                                  ? "text-danger"
+                                  : "text-success"
+                              )}
+                            >
+                              {snap.spfLookupCount || 0}/10
+                            </span>
+                          </div>
+                        </DetailBlock>
+
+                        {/* DKIM */}
+                        <DetailBlock title="DKIM Selectors" status={d.dkimStatus}>
+                          {dkimSelectors.length === 0 ? (
+                            <p className="text-xs text-danger">
+                              No DKIM selectors found
+                            </p>
+                          ) : (
+                            <ul className="flex flex-col gap-2">
+                              {dkimSelectors.map((sel, i) => (
+                                <li
                                   key={i}
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: 10,
-                                    marginBottom: 8,
-                                    padding: "8px 10px",
-                                    background: "var(--surface)",
-                                    border: "1px solid var(--border)",
-                                    borderRadius: 8,
-                                  }}
+                                  className="flex items-center gap-2.5 rounded-lg border border-border bg-card px-2.5 py-2"
                                 >
-                                  <code
-                                    style={{
-                                      fontSize: 12,
-                                      fontFamily: "var(--font-mono)",
-                                      color: "var(--text-2)",
-                                      flex: 1,
-                                    }}
-                                  >
+                                  <code className="flex-1 font-mono text-xs text-muted-foreground">
                                     {sel.selector}
                                   </code>
                                   <span
-                                    style={{
-                                      fontSize: 11,
-                                      fontFamily: "var(--font-mono)",
-                                      color:
-                                        (sel.keyBits || 0) >= 2048
-                                          ? "#10B981"
-                                          : "#F59E0B",
-                                      fontWeight: 600,
-                                    }}
+                                    className={cn(
+                                      "font-mono text-xs font-semibold",
+                                      (sel.keyBits || 0) >= 2048
+                                        ? "text-success"
+                                        : "text-warning"
+                                    )}
                                   >
                                     {sel.keyBits || "?"}bit
                                   </span>
                                   {sel.valid ? (
-                                    <CheckCircle size={12} color="#10B981" />
+                                    <CheckCircle
+                                      className="size-3 text-success"
+                                      aria-label="Valid"
+                                    />
                                   ) : (
-                                    <XCircle size={12} color="#EF4444" />
+                                    <XCircle
+                                      className="size-3 text-danger"
+                                      aria-label="Invalid"
+                                    />
                                   )}
-                                </div>
-                              ))
-                            )}
-                          </div>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </DetailBlock>
 
-                          {/* DMARC */}
-                          <div
-                            style={{
-                              background: "var(--surface-2)",
-                              border: "1px solid var(--border)",
-                              borderRadius: 12,
-                              padding: 16,
-                            }}
-                          >
-                            <div
-                              className="flex items-center gap-2"
-                              style={{ marginBottom: 12 }}
-                            >
-                              <StatusIcon
-                                status={snap.dmarcResult || d.dmarcStatus}
-                              />
-                              <p
-                                style={{
-                                  fontSize: 13,
-                                  fontWeight: 700,
-                                  color: "var(--text)",
-                                }}
+                        {/* DMARC */}
+                        <DetailBlock
+                          title="DMARC Policy"
+                          status={snap.dmarcResult || d.dmarcStatus}
+                        >
+                          {snap.dmarcRecord ? (
+                            <code className="mb-2.5 block rounded-md border border-border bg-card px-2.5 py-2 font-mono text-xs break-all text-muted-foreground">
+                              {snap.dmarcRecord}
+                            </code>
+                          ) : (
+                            <p className="mb-2.5 text-xs text-danger">
+                              No DMARC record found
+                            </p>
+                          )}
+                          {snap.dmarcPolicy && (
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                              <span>Policy:</span>
+                              <span
+                                className={cn(
+                                  "font-mono font-semibold",
+                                  snap.dmarcPolicy === "reject"
+                                    ? "text-success"
+                                    : snap.dmarcPolicy === "quarantine"
+                                      ? "text-warning"
+                                      : "text-danger"
+                                )}
                               >
-                                DMARC Policy
-                              </p>
+                                p={snap.dmarcPolicy}
+                              </span>
+                              <span>· pct={snap.dmarcPct ?? 100}%</span>
                             </div>
-                            {snap.dmarcRecord ? (
-                              <code
-                                style={{
-                                  display: "block",
-                                  fontSize: 11,
-                                  color: "var(--text-2)",
-                                  background: "var(--surface)",
-                                  border: "1px solid var(--border)",
-                                  borderRadius: 7,
-                                  padding: "8px 10px",
-                                  marginBottom: 10,
-                                  wordBreak: "break-all",
-                                  fontFamily: "var(--font-mono)",
-                                }}
-                              >
-                                {snap.dmarcRecord}
-                              </code>
-                            ) : (
-                              <p
-                                style={{
-                                  fontSize: 12.5,
-                                  color: "#EF4444",
-                                  marginBottom: 10,
-                                }}
-                              >
-                                No DMARC record found
-                              </p>
-                            )}
-                            {snap.dmarcPolicy && (
-                              <div className="flex items-center gap-2">
-                                <span
-                                  style={{
-                                    fontSize: 12,
-                                    color: "var(--text-3)",
-                                  }}
-                                >
-                                  Policy:
-                                </span>
-                                <span
-                                  style={{
-                                    fontSize: 12,
-                                    fontWeight: 700,
-                                    fontFamily: "var(--font-mono)",
-                                    color:
-                                      snap.dmarcPolicy === "reject"
-                                        ? "#10B981"
-                                        : snap.dmarcPolicy === "quarantine"
-                                          ? "#F59E0B"
-                                          : "#EF4444",
-                                  }}
-                                >
-                                  p={snap.dmarcPolicy}
-                                </span>
-                                <span
-                                  style={{
-                                    fontSize: 12,
-                                    color: "var(--text-3)",
-                                  }}
-                                >
-                                  · pct={snap.dmarcPct ?? 100}%
-                                </span>
-                              </div>
-                            )}
-                          </div>
+                          )}
+                        </DetailBlock>
 
-                          {/* Unsubscribe */}
-                          <div
-                            style={{
-                              background: "var(--surface-2)",
-                              border: "1px solid var(--border)",
-                              borderRadius: 12,
-                              padding: 16,
-                            }}
-                          >
-                            <div
-                              className="flex items-center gap-2"
-                              style={{ marginBottom: 12 }}
-                            >
-                              <StatusIcon
-                                status={
-                                  d.unsubStatus === "active" ? "pass" : "warn"
-                                }
-                              />
-                              <p
-                                style={{
-                                  fontSize: 13,
-                                  fontWeight: 700,
-                                  color: "var(--text)",
-                                }}
-                              >
-                                One-Click Unsubscribe
-                              </p>
-                            </div>
-                            {d.unsubStatus === "active" ? (
-                              <div className="flex items-center gap-2">
-                                <CheckCircle size={13} color="#10B981" />
-                                <span
-                                  style={{
-                                    fontSize: 12.5,
-                                    color: "#10B981",
-                                    fontWeight: 600,
-                                  }}
-                                >
-                                  RFC 8058 endpoint active
-                                </span>
-                              </div>
-                            ) : (
-                              <p
-                                style={{
-                                  fontSize: 12.5,
-                                  color: "var(--text-2)",
-                                  lineHeight: 1.5,
-                                }}
-                              >
-                                One-click unsubscribe endpoint not configured.
-                                Enable it in the Unsubscribe tab.
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
+                        {/* Unsubscribe */}
+                        <DetailBlock
+                          title="One-Click Unsubscribe"
+                          status={d.unsubStatus === "active" ? "pass" : "warn"}
+                        >
+                          {d.unsubStatus === "active" ? (
+                            <StatusBadge
+                              status="success"
+                              label="RFC 8058 endpoint active"
+                            />
+                          ) : (
+                            <p className="text-xs leading-relaxed text-muted-foreground">
+                              One-click unsubscribe endpoint not configured.
+                              Enable it in the Unsubscribe tab.
+                            </p>
+                          )}
+                        </DetailBlock>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Card>
+            )
+          })}
         </div>
       )}
     </div>
-  );
+  )
 }

@@ -52,19 +52,28 @@ export function statusFromString(value: string | null | undefined): StatusKind {
     case "warn":
     case "warning":
     case "degraded":
+    case "softfail":
+    case "soft":
       return "warning"
     case "fail":
     case "failed":
     case "error":
     case "critical":
     case "danger":
+    case "inactive":
+    case "disabled":
       return "danger"
     case "info":
       return "info"
     case "pending":
     case "scanning":
     case "queued":
+    case "unresolved":
       return "pending"
+    case "none":
+    case "missing":
+    case "unknown":
+      return "neutral"
     default:
       return "neutral"
   }

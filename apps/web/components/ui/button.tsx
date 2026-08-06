@@ -4,6 +4,24 @@ import { Slot } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Button — the single interactive button primitive for the app.
+ *
+ * Variants (`variant`):
+ * - `default`     — primary indigo action. One per view; the main CTA.
+ * - `secondary`   — muted fill for secondary actions sitting next to a primary.
+ * - `outline`     — bordered, transparent fill. Toolbar / icon buttons, tertiary actions.
+ * - `ghost`       — no border/fill until hover. Low-emphasis, dense UIs, menu rows.
+ * - `destructive` — solid red. Irreversible actions (delete/remove); pair with a confirm dialog.
+ * - `link`        — renders as an inline text link.
+ *
+ * Sizes (`size`):
+ * - `default` (h-9), `sm` (h-8), `xs` (h-7), `lg` (h-10) — text buttons.
+ * - `icon` (9), `icon-sm` (8), `icon-xs` (7), `icon-lg` (10) — square icon-only buttons.
+ *   Icon-only buttons MUST have an `aria-label`.
+ *
+ * Use `asChild` to render as another element (e.g. Next `<Link>`) while keeping button styling.
+ */
 const buttonVariants = cva(
   "group/button inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
