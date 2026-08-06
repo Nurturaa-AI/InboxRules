@@ -600,8 +600,6 @@ Known, deliberately-deferred work (also see the Phase 2 report):
    unread-count/acknowledgement (currently presentational).
 6. **`middleware` → `proxy`.** Adopt the Next 16 rename to clear the build
    deprecation warning; verify against `node_modules/next/dist/docs/`.
-7. **Settings webhook editor.** A custom-webhook channel field exists in state
-   but has no UI; add an editor if the feature is prioritized.
 
 ---
 

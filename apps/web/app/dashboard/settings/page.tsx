@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useAuth, useUser } from "@clerk/nextjs"
 import { toast } from "sonner"
-import { Save, Mail, MessageSquare } from "lucide-react"
+import { Save, Mail, MessageSquare, Webhook } from "lucide-react"
 
 import { useApiQuery, apiRequest } from "@/lib/useApiQuery"
 import { Button } from "@/components/ui/button"
@@ -285,6 +285,63 @@ export default function SettingsPage() {
                       }
                     />
                   ))}
+                </div>
+              </CardContent>
+            )}
+          </Card>
+
+          {/* WEBHOOK */}
+          <Card className="gap-0 p-0">
+            <CardHeader className="flex flex-row items-center justify-between gap-2.5 border-b p-5">
+              <div className="flex items-center gap-2.5">
+                <span className="flex size-8 items-center justify-center rounded-md bg-muted text-muted-foreground [&_svg]:size-4">
+                  <Webhook aria-hidden="true" />
+                </span>
+                <CardTitle className="text-sm">Custom Webhook</CardTitle>
+              </div>
+              <Switch
+                id="webhook-enabled"
+                aria-label="Enable custom webhook notifications"
+                checked={channels.webhook.enabled}
+                onCheckedChange={(v) =>
+                  setChannels((c) =>
+                    c ? { ...c, webhook: { ...c.webhook, enabled: v } } : c
+                  )
+                }
+              />
+            </CardHeader>
+
+            {channels.webhook.enabled && (
+              <CardContent className="flex flex-col gap-4 p-5">
+                <div className="flex flex-col gap-1.5">
+                  <label
+                    htmlFor="webhook-url"
+                    className="text-sm font-medium text-foreground"
+                  >
+                    Endpoint URL
+                  </label>
+                  <Input
+                    id="webhook-url"
+                    type="url"
+                    value={channels.webhook.url || ""}
+                    onChange={(e) =>
+                      setChannels((c) =>
+                        c
+                          ? {
+                              ...c,
+                              webhook: {
+                                ...c.webhook,
+                                url: e.target.value,
+                              },
+                            }
+                          : c
+                      )
+                    }
+                    placeholder="https://example.com/hooks/inboxrules"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    We POST a JSON payload to this URL for every alert.
+                  </p>
                 </div>
               </CardContent>
             )}
