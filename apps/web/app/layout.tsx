@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 // Load Plus Jakarta Sans for body text
@@ -54,6 +55,7 @@ export default function RootLayout({
             enableSystem={false}
           >
             {children}
+            <Toaster />
           </ThemeProvider>
         </body>
       </html>
