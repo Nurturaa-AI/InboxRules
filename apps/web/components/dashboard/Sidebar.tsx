@@ -1,8 +1,9 @@
-"use client";
+"use client"
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useUser, useClerk } from "@clerk/nextjs";
+import * as React from "react"
+import Link from "next/link"
+import { usePathname } from "next/navigation"
+import { useUser, useClerk } from "@clerk/nextjs"
 import {
   LayoutDashboard,
   Globe,
@@ -14,8 +15,12 @@ import {
   Settings,
   LogOut,
   Inbox,
-} from "lucide-react";
-import Image from "next/image";
+  X,
+} from "lucide-react"
+import Image from "next/image"
+
+import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 
 const NAV_ITEMS = [
   {
@@ -23,7 +28,11 @@ const NAV_ITEMS = [
     items: [
       { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
       { label: "Domains", icon: Globe, href: "/dashboard/domains" },
-      { label: "Compliance", icon: ShieldCheck, href: "/dashboard/compliance" },
+      {
+        label: "Compliance",
+        icon: ShieldCheck,
+        href: "/dashboard/compliance",
+      },
       { label: "Unsubscribe", icon: Mail, href: "/dashboard/unsubscribe" },
     ],
   },
@@ -41,96 +50,61 @@ const NAV_ITEMS = [
       { label: "Settings", icon: Settings, href: "/dashboard/settings" },
     ],
   },
-];
+]
 
-export default function Sidebar() {
-  const pathname = usePathname();
-  const { user } = useUser();
-  const { signOut } = useClerk();
+interface SidebarContentProps {
+  onClose?: () => void
+}
 
-  // Get display name from Clerk user object
+function SidebarContent({ onClose }: SidebarContentProps) {
+  const pathname = usePathname()
+  const { user } = useUser()
+  const { signOut } = useClerk()
+
   const displayName = user?.firstName
     ? `${user.firstName} ${user.lastName || ""}`.trim()
-    : user?.emailAddresses?.[0]?.emailAddress?.split("@")[0] || "User";
+    : user?.emailAddresses?.[0]?.emailAddress?.split("@")[0] || "User"
 
-  // Get initials for avatar fallback
   const initials =
     user?.firstName && user?.lastName
       ? `${user.firstName[0]}${user.lastName[0]}`.toUpperCase()
-      : displayName.substring(0, 2).toUpperCase();
+      : displayName.substring(0, 2).toUpperCase()
 
   return (
-    <aside
-      className="flex flex-col shrink-0"
-      style={{
-        width: 228,
-        minWidth: 228,
-        background: "#060D1F",
-        borderRight: "1px solid rgba(255,255,255,0.05)",
-      }}
-    >
-      {/* ── Brand ── */}
-      <div
-        className="flex items-center gap-3"
-        style={{
-          padding: "22px 18px",
-          borderBottom: "1px solid rgba(255,255,255,0.05)",
-        }}
-      >
-        <div
-          style={{
-            width: 36,
-            height: 36,
-            borderRadius: 10,
-            flexShrink: 0,
-            background: "linear-gradient(135deg, #2563EB 0%, #7C3AED 100%)",
-            boxShadow: "0 4px 12px rgba(37,99,235,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Inbox size={17} color="white" strokeWidth={2.5} />
+    <div className="flex h-full flex-col bg-sidebar">
+      {/* Brand */}
+      <div className="flex items-center justify-between gap-3 border-b border-sidebar-border px-4 py-5">
+        <div className="flex items-center gap-3">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary/80 shadow-lg shadow-primary/40">
+            <Inbox className="size-[18px] text-primary-foreground" strokeWidth={2.5} />
+          </div>
+          <div>
+            <p className="text-[15px] font-extrabold leading-none tracking-tight text-sidebar-foreground">
+              Inbox<span className="text-primary">Rules</span>
+            </p>
+            <p className="mt-0.5 text-[10px] font-medium text-sidebar-foreground/30">
+              Compliance Platform
+            </p>
+          </div>
         </div>
-        <div>
-          <p
-            style={{
-              color: "white",
-              fontWeight: 800,
-              fontSize: 15.5,
-              letterSpacing: "-0.3px",
-              lineHeight: 1,
-            }}
+        {onClose && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onClose}
+            className="lg:hidden text-sidebar-foreground/50 hover:text-sidebar-foreground"
+            aria-label="Close menu"
           >
-            Inbox<span style={{ color: "#60A5FA" }}>Rules</span>
-          </p>
-          <p
-            style={{
-              color: "#1E3A5F",
-              fontSize: 10,
-              marginTop: 3,
-              fontWeight: 500,
-            }}
-          >
-            Compliance Platform
-          </p>
-        </div>
+            <X />
+          </Button>
+        )}
       </div>
 
-      {/* ── Navigation ── */}
-      <nav className="flex-1 overflow-y-auto" style={{ padding: "18px 10px" }}>
+      {/* Navigation */}
+      <nav className="flex-1 overflow-y-auto px-2.5 py-4">
         {NAV_ITEMS.map((section) => (
-          <div key={section.section} style={{ marginBottom: 26 }}>
-            <p
-              style={{
-                fontSize: 9.5,
-                fontWeight: 700,
-                letterSpacing: "0.1em",
-                color: "#1E3A5F",
-                padding: "0 10px",
-                marginBottom: 6,
-              }}
-            >
+          <div key={section.section} className="mb-6">
+            <p className="mb-1.5 px-2.5 text-[10px] font-bold uppercase tracking-wider text-sidebar-foreground/30">
               {section.section}
             </p>
 
@@ -138,142 +112,106 @@ export default function Sidebar() {
               const isActive =
                 item.href === "/dashboard"
                   ? pathname === "/dashboard"
-                  : pathname.startsWith(item.href);
-              const Icon = item.icon;
+                  : pathname.startsWith(item.href)
+              const Icon = item.icon
 
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    padding: "9px 10px",
-                    borderRadius: 10,
-                    marginBottom: 2,
-                    fontSize: 13,
-                    fontWeight: isActive ? 600 : 500,
-                    textDecoration: "none",
-                    color: isActive ? "#FFFFFF" : "#3D5A80",
-                    background: isActive
-                      ? "linear-gradient(135deg, rgba(37,99,235,0.85), rgba(124,58,237,0.7))"
-                      : "transparent",
-                    boxShadow: isActive
-                      ? "0 4px 12px rgba(37,99,235,0.25)"
-                      : "none",
-                    transition: "all 0.15s",
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isActive) {
-                      const el = e.currentTarget as HTMLAnchorElement;
-                      el.style.background = "rgba(255,255,255,0.05)";
-                      el.style.color = "#7FA3C8";
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isActive) {
-                      const el = e.currentTarget as HTMLAnchorElement;
-                      el.style.background = "transparent";
-                      el.style.color = "#3D5A80";
-                    }
-                  }}
+                  onClick={onClose}
+                  className={cn(
+                    "group mb-0.5 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-colors outline-none",
+                    "focus-visible:ring-2 focus-visible:ring-ring/40",
+                    isActive
+                      ? "bg-gradient-to-br from-primary to-primary/90 text-primary-foreground shadow-md shadow-primary/25 font-semibold"
+                      : "text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                  )}
                 >
                   <Icon
-                    size={15}
-                    strokeWidth={isActive ? 2.5 : 2}
-                    style={{ flexShrink: 0 }}
+                    className={cn(
+                      "size-[15px] shrink-0",
+                      isActive && "stroke-[2.5]"
+                    )}
                   />
-                  <span style={{ flex: 1 }}>{item.label}</span>
+                  <span className="flex-1">{item.label}</span>
 
                   {"badge" in item && item.badge ? (
-                    <span
-                      style={{
-                        background: "#EF4444",
-                        color: "white",
-                        fontSize: 10,
-                        fontWeight: 700,
-                        padding: "1px 6px",
-                        borderRadius: 999,
-                      }}
-                    >
+                    <span className="rounded-full bg-danger px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-danger-foreground">
                       {item.badge}
                     </span>
                   ) : null}
                 </Link>
-              );
+              )
             })}
           </div>
         ))}
       </nav>
 
-      {/* ── User ── */}
-      <div
-        style={{
-          padding: "12px 10px",
-          borderTop: "1px solid rgba(255,255,255,0.05)",
-        }}
-      >
-        <div
-          className="flex items-center gap-2.5 rounded-xl cursor-pointer"
-          style={{ padding: "9px 10px" }}
+      {/* User */}
+      <div className="border-t border-sidebar-border p-2.5">
+        <Button
+          variant="ghost"
           onClick={() => signOut({ redirectUrl: "/sign-in" })}
-          title="Sign out"
+          className="h-auto w-full justify-start gap-2.5 rounded-xl px-2.5 py-2 text-sidebar-foreground/80 hover:text-sidebar-foreground"
         >
-          {/* Avatar — Clerk profile image or initials */}
           {user?.imageUrl ? (
             <Image
               src={user.imageUrl}
               alt={displayName}
               width={34}
               height={34}
-              style={{
-                borderRadius: "50%",
-                objectFit: "cover",
-                flexShrink: 0,
-              }}
+              className="size-[34px] shrink-0 rounded-full object-cover"
             />
           ) : (
-            <div
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: "50%",
-                flexShrink: 0,
-                background: "linear-gradient(135deg, #2563EB, #7C3AED)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 12,
-                fontWeight: 700,
-                color: "white",
-              }}
-            >
+            <div className="flex size-[34px] shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary/80 text-xs font-bold text-primary-foreground">
               {initials}
             </div>
           )}
 
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <p
-              style={{
-                color: "#CBD5E1",
-                fontSize: 13,
-                fontWeight: 600,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
+          <div className="flex-1 overflow-hidden text-left">
+            <p className="truncate text-[13px] font-semibold text-sidebar-foreground">
               {displayName}
             </p>
-            <p style={{ color: "#1E3A5F", fontSize: 11, marginTop: 1 }}>
-              Pro Plan
-            </p>
+            <p className="text-[11px] text-sidebar-foreground/30">Pro Plan</p>
           </div>
 
-          <LogOut size={14} color="#1E3A5F" />
-        </div>
+          <LogOut className="size-[14px] text-sidebar-foreground/30" />
+        </Button>
       </div>
-    </aside>
-  );
+    </div>
+  )
+}
+
+export default function Sidebar() {
+  const [mobileOpen, setMobileOpen] = React.useState(false)
+
+  return (
+    <>
+      {/* Desktop sidebar */}
+      <aside className="hidden lg:flex lg:w-[228px] lg:shrink-0 lg:flex-col lg:border-r lg:border-sidebar-border">
+        <SidebarContent />
+      </aside>
+
+      {/* Mobile overlay + drawer */}
+      {mobileOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm lg:hidden"
+            onClick={() => setMobileOpen(false)}
+            aria-hidden="true"
+          />
+          <aside className="fixed top-0 left-0 z-50 h-full w-[280px] shadow-xl lg:hidden">
+            <SidebarContent onClose={() => setMobileOpen(false)} />
+          </aside>
+        </>
+      )}
+    </>
+  )
+}
+
+// Export the trigger so Header can mount it
+export function SidebarMobileTrigger() {
+  // This will be wired from Header via a shared context or prop drilling in the next file
+  return null
 }

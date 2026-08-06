@@ -846,7 +846,7 @@ export default function AddDomainWizard({ onClose, onDomainAdded }: Props) {
                     },
                     {
                       label: `DKIM — ${dnsResult.dkim?.length || 0} selector(s)`,
-                      status: dnsResult.dkim?.some((d: unknown) => d.valid)
+                      status: dnsResult.dkim?.some((d: DKIMRecord) => d.valid)
                         ? "pass"
                         : "fail",
                       detail: dnsResult.dkim
@@ -1199,7 +1199,7 @@ export default function AddDomainWizard({ onClose, onDomainAdded }: Props) {
           {step === 4 && (
             <button
               onClick={() => {
-                onDomainAdded(addedDomain);
+                if (addedDomain) onDomainAdded(addedDomain);
                 onClose();
               }}
               style={{
