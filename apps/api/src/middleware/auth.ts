@@ -16,27 +16,31 @@ declare module "fastify" {
 // pk_test_abc123 → https://abc123.clerk.accounts.dev/.well-known/jwks.json
 // pk_live_abc123 → https://abc123.clerk.accounts.com/.well-known/jwks.json
 function getJwksUrl(): string {
+  // Prefer explicit config when present. The .env already sets these correctly;
+  // deriving from the publishable key is only a fallback.
+  if (process.env.CLERK_JWKS_URL) {
+    return process.env.CLERK_JWKS_URL;
+  }
+  if (process.env.CLERK_DOMAIN) {
+    return `https://${process.env.CLERK_DOMAIN}/.well-known/jwks.json`;
+  }
+
   const pk = process.env.CLERK_PUBLISHABLE_KEY || "";
 
   if (!pk) {
     throw new Error("CLERK_PUBLISHABLE_KEY is not set in .env");
   }
 
-  // Extract the instance part from the publishable key
-  // pk_test_XXXXXXXXXX → XXXXXXXXXX
+  // A Clerk publishable key is `pk_<test|live>_<base64>`, where the base64
+  // decodes to the Frontend API HOST followed by a `$` — e.g.
+  // "golden-ferret-62.clerk.accounts.dev$". It is a bare host with NO scheme,
+  // so we must prepend https:// ourselves. Returning it without a scheme is
+  // what made `new URL(...)` throw "Invalid URL" on every request.
   const withoutPrefix = pk.replace(/^pk_(test|live)_/, "");
+  const decoded = Buffer.from(withoutPrefix, "base64").toString("utf8");
+  const host = decoded.replace(/\$+$/, "").trim();
 
-  // Clerk encodes the frontend API URL in the key as base64.
-  try {
-    const decoded = Buffer.from(withoutPrefix, "base64").toString("utf8");
-    const frontendApiUrl = decoded.replace(/\$+$/, "").trim();
-
-    return `${frontendApiUrl}/.well-known/jwks.json`;
-  } catch {
-    const fragment = withoutPrefix.toLowerCase();
-
-    return `https://${fragment}.clerk.accounts.dev/.well-known/jwks.json`;
-  }
+  return `https://${host}/.well-known/jwks.json`;
 }
 
 // Cache the JWKS set so we don't fetch it on every request
@@ -48,6 +52,30 @@ function getJwks() {
     jwks = createRemoteJWKSet(new URL(url));
   }
   return jwks;
+}
+
+// Decides whether a token's `azp` (authorized party = frontend origin) is one
+// we trust. In development we accept any localhost/127.0.0.1 origin because the
+// Next dev server's port is not stable. In production we require an exact match
+// against FRONTEND_URL (comma-separated list allowed for multiple frontends).
+function isAuthorizedParty(azp: string): boolean {
+  if (process.env.NODE_ENV !== "production") {
+    try {
+      const host = new URL(azp).hostname;
+      if (host === "localhost" || host === "127.0.0.1") {
+        return true;
+      }
+    } catch {
+      // Not a parseable URL — fall through to the configured allow-list.
+    }
+  }
+
+  const allowed = (process.env.FRONTEND_URL || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  return allowed.includes(azp);
 }
 
 export async function authMiddleware(
@@ -76,21 +104,31 @@ export async function authMiddleware(
   try {
     // Verify the JWT using Clerk's public keys
     const { payload } = await jwtVerify(token, getJwks(), {
-      // Allow 60 seconds of clock skew — fixes the clock skew issue
+      // Allow 60 seconds of clock skew
       clockTolerance: 60,
 
-      // Issuer validation: Clerk tokens are always issued by your Clerk instance.
-      // This guards against tokens from a different Clerk instance or a forged
-      // issuer claim. The issuer is https://<your-instance>.clerk.accounts.dev
-      // or .com for production. Derive the expected domain from CLERK_PUBLISHABLE_KEY.
+      // Issuer validation: Clerk tokens are issued by your Clerk instance, e.g.
+      // https://<instance>.clerk.accounts.dev (or a custom domain in prod).
       issuer: getJwksUrl().replace("/.well-known/jwks.json", ""),
 
-      // Authorized party (`azp`) validation: Clerk recommends verifying azp to
-      // bind tokens to your frontend origin. This prevents a token issued to
-      // attacker.com from being replayed against your API. The azp claim appears
-      // in the standard `aud` field for Clerk JWTs. In dev we allow localhost.
-      audience: process.env.FRONTEND_URL || "http://localhost:3000",
+      // NOTE: do NOT pass `audience` here. Clerk's default session token has no
+      // `aud` claim — the frontend origin lives in `azp` — so validating the
+      // audience rejects every legitimate token. We check `azp` manually below.
     });
+
+    // Authorized-party check: bind the token to our own frontend origin so a
+    // token minted for a different site can't be replayed against this API.
+    // Clerk puts that origin in `azp`; only enforce when the token carries it.
+    //
+    // Dev vs prod split mirrors the CORS config in server.ts: in development
+    // the Next dev server may land on any localhost port (3000, 3001, 3500…),
+    // so accept any localhost origin rather than hard-coding a port that drifts
+    // between runs. In production, bind strictly to the configured frontend(s).
+    if (typeof payload.azp === "string" && payload.azp) {
+      if (!isAuthorizedParty(payload.azp)) {
+        throw new Error(`Untrusted authorized party (azp): ${payload.azp}`);
+      }
+    }
 
     const clerkUserId = payload.sub;
 
