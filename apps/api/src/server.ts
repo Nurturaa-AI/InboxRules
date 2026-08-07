@@ -26,6 +26,7 @@ import {
   suppressionRoutes,
   internalSuppressionRoutes,
 } from "./modules/suppression/suppression.routes";
+import { analyticsRoutes } from "./modules/analytics/analytics.routes";
 
 // Create the Fastify app instance
 const app = Fastify({
@@ -134,6 +135,9 @@ async function buildApp() {
 
       // Billing routes
       protectedApp.register(billingRoutes, { prefix: "/billing" });
+
+      // Analytics routes
+      protectedApp.register(analyticsRoutes, { prefix: "/analytics" });
     },
     { prefix: "/api/v1" },
   );
