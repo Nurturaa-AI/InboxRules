@@ -1,114 +1,92 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
-import { useAuth } from "@clerk/nextjs"
 import { Globe, ShieldCheck, AlertTriangle, Mail } from "lucide-react"
 
+import { useApiQuery } from "@/lib/useApiQuery"
 import { MetricCard } from "@/components/shared/MetricCard"
 import { LoadingSkeleton } from "@/components/shared/LoadingSkeleton"
 
-interface Stats {
-  totalDomains: number
-  healthyDomains: number
-  activeAlerts: number
-  unsubscribes: number
+// Shape returned by GET /analytics/overview (the subset this widget reads).
+interface Overview {
+  health: {
+    average: number
+    healthy: number
+    warning: number
+    critical: number
+  }
+  alerts: {
+    total: number
+    unresolved: number
+    critical: number
+    previousTotal: number
+    trendPct: number | null
+  }
+  suppressions: {
+    total: number
+    previousTotal: number
+    trendPct: number | null
+  }
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4500"
+// Turn a nullable trendPct into MetricCard delta/trend props. Null (no prior
+// period to compare) renders no delta at all — never a fabricated 0%.
+function trendProps(pct: number | null): {
+  delta?: string
+  trend: "up" | "down" | "neutral"
+} {
+  if (pct === null) return { trend: "neutral" }
+  if (pct > 0) return { delta: `+${pct}%`, trend: "up" }
+  if (pct < 0) return { delta: `${pct}%`, trend: "down" }
+  return { delta: "0%", trend: "neutral" }
+}
 
 export default function StatCards() {
-  const { getToken } = useAuth()
-  const [stats, setStats] = useState<Stats>({
-    totalDomains: 0,
-    healthyDomains: 0,
-    activeAlerts: 0,
-    unsubscribes: 0,
-  })
-  const [loading, setLoading] = useState(true)
-
-  const fetchStats = useCallback(async () => {
-    try {
-      const token = await getToken()
-      if (!token) return
-
-      const [domainsRes, alertsRes, suppressionRes] = await Promise.all([
-        fetch(`${API_URL}/api/v1/domains?limit=100`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch(`${API_URL}/api/v1/alerts?status=unresolved&limit=1`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch(`${API_URL}/api/v1/suppression?limit=1`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-      ])
-
-      const domainsData = domainsRes.ok ? await domainsRes.json() : null
-      const alertsData = alertsRes.ok ? await alertsRes.json() : null
-      const suppressionData = suppressionRes.ok
-        ? await suppressionRes.json()
-        : null
-
-      const domains = domainsData?.data || []
-
-      setStats({
-        totalDomains: domains.length,
-        healthyDomains: domains.filter(
-          (d: { healthScore: number }) => d.healthScore >= 80
-        ).length,
-        activeAlerts: alertsData?.pagination?.total ?? 0,
-        unsubscribes: suppressionData?.pagination?.total ?? 0,
-      })
-    } catch {
-      // keep zeros on error
-    } finally {
-      setLoading(false)
-    }
-  }, [getToken])
-
-  useEffect(() => {
-    // Avoid calling setState synchronously within an effect to prevent
-    // cascading renders. Schedule the fetch asynchronously.
-    void Promise.resolve().then(() => fetchStats())
-  }, [fetchStats])
+  const { data, loading } = useApiQuery<Overview>("/analytics/overview?period=7")
 
   if (loading) {
     return <LoadingSkeleton variant="metrics" count={4} />
   }
 
+  const health = data?.health
+  const totalDomains = health
+    ? health.healthy + health.warning + health.critical
+    : 0
+  const healthyDomains = health?.healthy ?? 0
   const healthyPct =
-    stats.totalDomains > 0
-      ? Math.round((stats.healthyDomains / stats.totalDomains) * 100)
-      : 0
+    totalDomains > 0 ? Math.round((healthyDomains / totalDomains) * 100) : 0
+
+  const unresolvedAlerts = data?.alerts.unresolved ?? 0
+  const suppressions = data?.suppressions.total ?? 0
+  const suppressionsTrend = trendProps(data?.suppressions.trendPct ?? null)
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <MetricCard
         label="Total Domains"
-        value={stats.totalDomains}
+        value={totalDomains}
         icon={Globe}
-        hint={`${stats.healthyDomains} healthy`}
+        hint={`${healthyDomains} healthy`}
       />
       <MetricCard
         label="Healthy Domains"
-        value={stats.healthyDomains}
+        value={healthyDomains}
         icon={ShieldCheck}
-        delta={stats.totalDomains > 0 ? `${healthyPct}%` : undefined}
-        trend={stats.totalDomains > 0 ? "up" : "neutral"}
-        hint={stats.totalDomains > 0 ? "of total" : "No domains yet"}
+        hint={totalDomains > 0 ? `${healthyPct}% of total` : "No domains yet"}
       />
       <MetricCard
         label="Active Alerts"
-        value={stats.activeAlerts}
+        value={unresolvedAlerts}
         icon={AlertTriangle}
         trendUpIsGood={false}
-        hint={stats.activeAlerts === 0 ? "All clear" : "Need attention"}
+        hint={unresolvedAlerts === 0 ? "All clear" : "Need attention"}
       />
       <MetricCard
         label="Unsubscribes"
-        value={stats.unsubscribes}
+        value={suppressions}
         icon={Mail}
-        hint="Via hosted endpoint"
+        {...suppressionsTrend}
+        trendUpIsGood={false}
+        hint="Last 7 days"
       />
     </div>
   )
