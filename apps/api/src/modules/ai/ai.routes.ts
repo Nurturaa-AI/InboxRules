@@ -11,6 +11,7 @@ import { checkDomain } from "../dns-checker/dns.service";
 import { analyzeEmailHeaders } from "./header-analyzer";
 import { generateHeaderSnippet } from "./snippet-generator";
 import { assertAiQuota, AiQuotaExceededError } from "./ai-quota";
+import { redact } from "../../lib/redact";
 
 export async function aiRoutes(app: FastifyInstance) {
   // ─────────────────────────────────────────────
@@ -171,7 +172,10 @@ export async function aiRoutes(app: FastifyInstance) {
           },
         });
       }
-      app.log.error({ err, tenantId }, "Snippet generation failed");
+      app.log.error(
+        { err: redact(err), tenantId },
+        "Snippet generation failed",
+      );
       return reply.status(500).send({
         error: {
           code: "INTERNAL_ERROR",

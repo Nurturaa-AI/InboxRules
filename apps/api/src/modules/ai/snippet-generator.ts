@@ -10,6 +10,7 @@
 
 import { genAI } from "./gemini";
 import { assertAiQuota } from "./ai-quota";
+import { redact } from "../../lib/redact";
 
 // ─────────────────────────────────────────────
 // TYPES
@@ -271,7 +272,7 @@ Respond with ONLY a JSON object:
       source: "ai",
     };
   } catch (err: any) {
-    console.error("[AI] Snippet generator failed:", err.message);
+    console.error("[AI] Snippet generator failed:", redact(err));
 
     // Return a generic fallback if AI fails
     return {
@@ -309,6 +310,6 @@ async function logSnippetUsage(data: {
       },
     });
   } catch (err: any) {
-    console.error("[AI] Failed to log snippet usage:", err.message);
+    console.error("[AI] Failed to log snippet usage:", redact(err));
   }
 }

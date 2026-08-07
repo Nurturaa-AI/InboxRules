@@ -10,6 +10,7 @@
 // the request path, BEFORE Gemini is invoked.
 
 import db from "../../db";
+import { redact } from "../../lib/redact";
 
 // Monthly AI budget per plan, in USD. Generous relative to expected usage —
 // the point is to cap runaway/abuse, not to meter normal use. Tune as needed.
@@ -59,7 +60,7 @@ export async function assertAiQuota(tenantId: string): Promise<void> {
   } catch (err: any) {
     // Metering/DB failure — fail OPEN so a transient outage doesn't take AI
     // features down for everyone. Abuse is bounded by the global rate limit.
-    console.error("[AI] Quota check failed, allowing request:", err.message);
+    console.error("[AI] Quota check failed, allowing request:", redact(err));
     return;
   }
 
