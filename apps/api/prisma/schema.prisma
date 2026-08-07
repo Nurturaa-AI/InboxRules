@@ -66,7 +66,19 @@ model Domain {
   spfStatus     String    @default("unknown")
   dkimStatus    String    @default("unknown")
   dmarcStatus   String    @default("unknown")
-  unsubStatus   String    @default("unknown")
+  // BIMI / MTA-STS / TLS-RPT are measured by the DNS checker alongside
+  // SPF/DKIM/DMARC. Same value space as the others: "pass" | "none" |
+  // "invalid" | "error" after a scan, "unknown" before the first scan.
+  bimiStatus    String    @default("unknown")
+  mtaStsStatus  String    @default("unknown")
+  tlsRptStatus  String    @default("unknown")
+  // One-click unsubscribe (RFC 8058) is a per-domain OPT-IN feature, not a DNS
+  // signal. unsubEnabled is the real, user-controlled state: when true, the
+  // hosted endpoint issues signed tokens + List-Unsubscribe headers for this
+  // domain. unsubStatus is derived from it for display ("active"/"inactive").
+  unsubStatus    String    @default("unknown")
+  unsubEnabled   Boolean   @default(false)
+  unsubEnabledAt DateTime?
   detectedEsp   String?
   lastCheckedAt DateTime?
   createdAt     DateTime  @default(now())
@@ -106,6 +118,12 @@ model DnsSnapshot {
   dmarcRecord    String?
   dmarcPolicy    String?
   dmarcPct       Int?
+  bimiRecord     String?
+  bimiResult     String?
+  mtaStsRecord   String?
+  mtaStsResult   String?
+  tlsRptRecord   String?
+  tlsRptResult   String?
   overallScore   Int      @default(0)
   capturedAt     DateTime @default(now())
 
