@@ -1,0 +1,48 @@
+# Local Redis for InboxRules dev.
+#
+# Replaces the Upstash free-tier instance in dev: Upstash's per-command rate
+# limit trips under BullMQ's constant polling, which makes manual scans fail
+# with "ERR ... temporarily rate-limited". A local Redis has no such limit.
+#
+# Usage (from apps/api/):
+#   docker compose up -d        # start Redis in the background
+#   docker compose ps           # check status / health
+#   docker compose logs -f redis
+#   docker compose down         # stop (keeps data volume)
+#   docker compose down -v      # stop and wipe the data volume
+#
+# Then point apps/api/.env at it:  REDIS_URL=redis://localhost:6380
+#
+# NOTE: the host port is 6380, not the default 6379 — another local project
+# already publishes a Redis on 6379, and sharing that keyspace would mix
+# InboxRules' BullMQ queues with theirs. Inside the container it's still 6379.
+#
+# Only apps/api needs this. Postgres stays remote (Neon), so it is not here.
+name: inboxrules
+
+services:
+  redis:
+    # 7-alpine also clears BullMQ's "min Redis 6.2.0 recommended" warning that
+    # the old Upstash instance (reported 5.0.0) produced.
+    image: redis:7-alpine
+    container_name: inboxrules-redis
+    restart: unless-stopped
+    ports:
+      # host:container — host 6380 to avoid colliding with another local
+      # project's Redis already on 6379. Container port stays the default 6379.
+      - "6380:6379"
+    # Enable AOF persistence so queued jobs and the weekly-report SET-NX marker
+    # survive a container restart. Drop this arg if you want a purely ephemeral
+    # queue.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  redis-data:
