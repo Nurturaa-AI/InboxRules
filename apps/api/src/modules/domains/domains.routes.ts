@@ -24,6 +24,7 @@ import {
   enableUnsubscribe,
   disableUnsubscribe,
   getUnsubscribeHeaders,
+  QueueUnavailableError,
 } from "./domains.service";
 
 export async function domainRoutes(app: FastifyInstance) {
@@ -227,6 +228,27 @@ export async function domainRoutes(app: FastifyInstance) {
         message: result.message,
       });
     } catch (err: any) {
+      // The scan queue (Redis) being throttled or briefly down is a transient,
+      // retryable condition — surface it as 503 with a Retry-After hint, not a
+      // 500 that reads like the server broke. (Upstash's free tier returns
+      // "temporarily rate-limited" under load; see QueueUnavailableError.)
+      if (err instanceof QueueUnavailableError) {
+        app.log.warn(
+          { err, tenantId, domainId: id },
+          "Scan queue unavailable — returning 503",
+        );
+        return reply
+          .header("Retry-After", "30")
+          .status(503)
+          .send({
+            error: {
+              code: "QUEUE_UNAVAILABLE",
+              message:
+                "Scan service is busy right now. Please try again in a moment.",
+            },
+          });
+      }
+
       app.log.error({ err, tenantId, domainId: id }, "Failed to trigger scan");
       return reply.status(500).send({
         error: {
