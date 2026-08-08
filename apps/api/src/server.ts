@@ -26,6 +26,7 @@ import {
   suppressionRoutes,
   internalSuppressionRoutes,
 } from "./modules/suppression/suppression.routes";
+import { analyticsRoutes } from "./modules/analytics/analytics.routes";
 
 // Create the Fastify app instance
 const app = Fastify({
@@ -77,9 +78,20 @@ async function buildApp() {
     allowedHeaders: ["Content-Type", "Authorization"],
   });
 
-  // Prevents API abuse — 100 requests per minute per IP
+  // Prevents API abuse — 100 requests per minute per IP.
+  //
+  // The store is environment-aware, mirroring the CORS split above:
+  //   • production  → Redis-backed, so the limit is shared across every API
+  //     instance Railway runs.
+  //   • development → in-memory (omit `redis`). A single dev process does not
+  //     need a *distributed* limit, and the Redis-backed limiter ran an Upstash
+  //     command on EVERY request before any handler — which (a) added a remote
+  //     round-trip to each request's latency and (b) burned the Upstash
+  //     free-tier command budget that the BullMQ workers also draw from (the
+  //     "temporarily rate-limited" errors). In-memory is strictly better here.
+  const useRedisRateLimit = process.env.NODE_ENV === "production";
   await app.register(rateLimit, {
-    redis,
+    ...(useRedisRateLimit ? { redis } : {}),
     max: 100,
     timeWindow: "1 minute",
     // Fail OPEN if Redis is unreachable/rate-limited: allow the request through
@@ -134,6 +146,9 @@ async function buildApp() {
 
       // Billing routes
       protectedApp.register(billingRoutes, { prefix: "/billing" });
+
+      // Analytics routes
+      protectedApp.register(analyticsRoutes, { prefix: "/analytics" });
     },
     { prefix: "/api/v1" },
   );

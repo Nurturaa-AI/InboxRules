@@ -9,6 +9,46 @@ import { z } from "zod";
 import db from "../../db";
 import { sendSlackAlert, sendAlertEmail } from "./alerts.service";
 
+// Notification channel configuration is stored as a JSON blob on the tenant
+// (Tenant.notificationChannels). This is the exact shape the settings UI
+// reads and writes.
+interface NotificationChannels {
+  email: {
+    enabled: boolean;
+    address: string;
+    onCritical: boolean;
+    onWarning: boolean;
+    weeklyReport: boolean;
+  };
+  slack: {
+    enabled: boolean;
+    webhookUrl: string | null;
+    onCritical: boolean;
+    onWarning: boolean;
+  };
+  webhook: { enabled: boolean; url: string | null };
+}
+
+// Defaults for a tenant that has never saved settings. The email address is
+// intentionally blank — the frontend fills it from the signed-in user's Clerk
+// email rather than us fabricating an address like "alerts@yourdomain.com".
+const DEFAULT_NOTIFICATION_CHANNELS: NotificationChannels = {
+  email: {
+    enabled: true,
+    address: "",
+    onCritical: true,
+    onWarning: true,
+    weeklyReport: true,
+  },
+  slack: {
+    enabled: false,
+    webhookUrl: null,
+    onCritical: true,
+    onWarning: false,
+  },
+  webhook: { enabled: false, url: null },
+};
+
 export async function alertRoutes(app: FastifyInstance) {
   // ─────────────────────────────────────────────
   // GET /api/v1/alerts
@@ -209,29 +249,14 @@ export async function alertRoutes(app: FastifyInstance) {
       });
     }
 
-    // Return mock channels for now
-    // Real implementation reads from tenant.notificationChannels JSON column
-    return reply.status(200).send({
-      data: {
-        email: {
-          enabled: true,
-          address: "alerts@yourdomain.com",
-          onCritical: true,
-          onWarning: true,
-          weeklyReport: true,
-        },
-        slack: {
-          enabled: false,
-          webhookUrl: null,
-          onCritical: true,
-          onWarning: false,
-        },
-        webhook: {
-          enabled: false,
-          url: null,
-        },
-      },
-    });
+    // Read the tenant's saved notification channels. A tenant that has never
+    // configured them gets sensible defaults (with a blank email address — the
+    // frontend seeds that from the signed-in user's Clerk email).
+    const channels =
+      (tenant.notificationChannels as unknown as NotificationChannels | null) ??
+      DEFAULT_NOTIFICATION_CHANNELS;
+
+    return reply.status(200).send({ data: channels });
   });
 
   // ─────────────────────────────────────────────
@@ -281,19 +306,44 @@ export async function alertRoutes(app: FastifyInstance) {
       });
     }
 
-    // In production: encrypt webhook URLs and store on tenant
-    // For MVP: acknowledge save
+    // Persist onto the tenant's notificationChannels JSON column. Merge onto
+    // the existing config so a partial update never silently wipes a channel
+    // the client didn't include in this request.
+    const tenant = await db.tenant.findUnique({ where: { id: tenantId } });
+
+    if (!tenant) {
+      return reply.status(404).send({
+        error: { code: "TENANT_NOT_FOUND", message: "Tenant not found" },
+      });
+    }
+
+    const parsed = parseResult.data;
+    const existing =
+      (tenant.notificationChannels as unknown as NotificationChannels | null) ??
+      DEFAULT_NOTIFICATION_CHANNELS;
+
+    const merged = {
+      email: parsed.email ?? existing.email,
+      slack: parsed.slack ?? existing.slack,
+      webhook: parsed.webhook ?? existing.webhook,
+    };
+
+    await db.tenant.update({
+      where: { id: tenantId },
+      data: { notificationChannels: merged as any },
+    });
+
     await db.auditLog.create({
       data: {
         tenantId,
         userId: request.userId,
         action: "alert.channels_updated",
-        metadata: parseResult.data as any,
+        metadata: parsed as any,
       },
     });
 
     return reply.status(200).send({
-      data: parseResult.data,
+      data: merged,
       message: "Notification channels updated",
     });
   });

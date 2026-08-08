@@ -10,6 +10,7 @@
 
 import { genAI } from "./gemini";
 import { DnsCheckResult } from "../dns-checker/dns.types";
+import { redact } from "../../lib/redact";
 
 // ─────────────────────────────────────────────
 // STREAMING ANALYZER
@@ -115,7 +116,7 @@ If everything is configured correctly, say so clearly and explain what each pass
       outputTokens: usage?.candidatesTokenCount,
     });
   } catch (err: any) {
-    console.error("[AI] Header analyzer failed:", err.message);
+    console.error("[AI] Header analyzer failed:", redact(err));
 
     // If streaming fails, yield a fallback message
     // The user gets something rather than an empty screen
@@ -193,6 +194,6 @@ async function logHeaderAnalysisUsage(data: {
       },
     });
   } catch (err: any) {
-    console.error("[AI] Failed to log header analysis usage:", err.message);
+    console.error("[AI] Failed to log header analysis usage:", redact(err));
   }
 }

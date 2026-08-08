@@ -8,6 +8,7 @@
 import db from "../../db";
 import { dnsPollQueue } from "../../queue";
 import { checkDomain, detectEsp } from "../dns-checker/dns.service";
+import { buildUnsubscribeHeaders } from "../suppression/suppression.service";
 import type { AddDomainInput, ListDomainsInput } from "./domains.schema";
 
 // ─────────────────────────────────────────────
@@ -71,7 +72,14 @@ export async function addDomain(tenantId: string, input: AddDomainInput) {
     spfStatus: "unknown",
     dkimStatus: "unknown",
     dmarcStatus: "unknown",
+    bimiStatus: "unknown",
+    mtaStsStatus: "unknown",
+    tlsRptStatus: "unknown",
     unsubStatus: "unknown",
+    // One-click unsubscribe is a per-domain opt-in; reactivating a
+    // previously-deleted domain must not silently re-enable it.
+    unsubEnabled: false,
+    unsubEnabledAt: null,
     detectedEsp: null,
     lastCheckedAt: null,
   };
@@ -158,6 +166,59 @@ export async function listDomains(tenantId: string, input: ListDomainsInput) {
     where.id = { gt: input.cursor };
   }
 
+  // Callers can opt in to the latest DNS snapshot per domain via
+  // `?include=snapshots`. The compliance page needs the raw SPF/DKIM/DMARC
+  // and BIMI/MTA-STS/TLS-RPT record detail, which only lives on the snapshot.
+  // The default (no-include) path stays lean — list/summary reads don't pay
+  // for a relation join they won't use.
+  const wantsSnapshots = (input.include ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .includes("snapshots");
+
+  // Only select the fields we need — avoids over-fetching
+  const select: any = {
+    id: true,
+    domain: true,
+    healthScore: true,
+    spfStatus: true,
+    dkimStatus: true,
+    dmarcStatus: true,
+    bimiStatus: true,
+    mtaStsStatus: true,
+    tlsRptStatus: true,
+    unsubStatus: true,
+    unsubEnabled: true,
+    detectedEsp: true,
+    lastCheckedAt: true,
+    createdAt: true,
+  };
+
+  if (wantsSnapshots) {
+    select.snapshots = {
+      orderBy: { capturedAt: "desc" },
+      take: 1,
+      select: {
+        id: true,
+        capturedAt: true,
+        spfRecord: true,
+        spfResult: true,
+        spfLookupCount: true,
+        dkimSelectors: true,
+        dmarcRecord: true,
+        dmarcPolicy: true,
+        dmarcPct: true,
+        bimiRecord: true,
+        bimiResult: true,
+        mtaStsRecord: true,
+        mtaStsResult: true,
+        tlsRptRecord: true,
+        tlsRptResult: true,
+        overallScore: true,
+      },
+    };
+  }
+
   // Fetch domains from the database
   const domains = await db.domain.findMany({
     where,
@@ -167,19 +228,7 @@ export async function listDomains(tenantId: string, input: ListDomainsInput) {
       // Most recently added domains first
       createdAt: "desc",
     },
-    // Only select the fields we need — avoids over-fetching
-    select: {
-      id: true,
-      domain: true,
-      healthScore: true,
-      spfStatus: true,
-      dkimStatus: true,
-      dmarcStatus: true,
-      unsubStatus: true,
-      detectedEsp: true,
-      lastCheckedAt: true,
-      createdAt: true,
-    },
+    select,
   });
 
   // Check if there are more pages after this one
@@ -345,6 +394,110 @@ export async function deleteDomain(tenantId: string, domainId: string) {
 }
 
 // ─────────────────────────────────────────────
+// ONE-CLICK UNSUBSCRIBE (RFC 8058) — per-domain opt-in
+//
+// Enabling flips the domain into a state where the tenant is expected to add
+// the List-Unsubscribe / List-Unsubscribe-Post headers we generate to their
+// outgoing mail. `unsubStatus` is DERIVED from `unsubEnabled` here (it is NOT
+// touched by DNS scans) so the compliance UI reflects genuine opt-in state.
+// ─────────────────────────────────────────────
+
+export async function enableUnsubscribe(tenantId: string, domainId: string) {
+  // Tenant guard — never act on another tenant's domain
+  const domain = await db.domain.findFirst({
+    where: { id: domainId, tenantId, deletedAt: null },
+  });
+
+  if (!domain) {
+    return null;
+  }
+
+  const updated = await db.domain.update({
+    where: { id: domainId },
+    data: {
+      unsubEnabled: true,
+      unsubEnabledAt: new Date(),
+      unsubStatus: "active",
+    },
+  });
+
+  await db.auditLog.create({
+    data: {
+      tenantId,
+      action: "domain.unsubscribe_enabled",
+      resourceType: "domain",
+      resourceId: domainId,
+      metadata: { domain: domain.domain },
+    },
+  });
+
+  return updated;
+}
+
+export async function disableUnsubscribe(tenantId: string, domainId: string) {
+  const domain = await db.domain.findFirst({
+    where: { id: domainId, tenantId, deletedAt: null },
+  });
+
+  if (!domain) {
+    return null;
+  }
+
+  const updated = await db.domain.update({
+    where: { id: domainId },
+    data: {
+      unsubEnabled: false,
+      unsubStatus: "inactive",
+    },
+  });
+
+  await db.auditLog.create({
+    data: {
+      tenantId,
+      action: "domain.unsubscribe_disabled",
+      resourceType: "domain",
+      resourceId: domainId,
+      metadata: { domain: domain.domain },
+    },
+  });
+
+  return updated;
+}
+
+// Produce the real List-Unsubscribe headers for a given recipient. The token
+// encodes `domainId:recipientEmail`, so headers are per-recipient — we require
+// a real recipient rather than fabricating a placeholder. Returns:
+//   null                       — domain not found / not this tenant's
+//   { notEnabled: true }       — domain exists but one-click is not enabled
+//   { listUnsubscribe, ... }   — the genuine headers to send from this domain
+export async function getUnsubscribeHeaders(
+  tenantId: string,
+  domainId: string,
+  recipient: string,
+) {
+  const domain = await db.domain.findFirst({
+    where: { id: domainId, tenantId, deletedAt: null },
+  });
+
+  if (!domain) {
+    return null;
+  }
+
+  if (!domain.unsubEnabled) {
+    return { notEnabled: true as const };
+  }
+
+  const headers = await buildUnsubscribeHeaders(
+    tenantId,
+    domain.id,
+    domain.domain,
+    recipient,
+  );
+
+  return headers;
+}
+
+// ─────────────────────────────────────────────
 // RUN A SCAN AND SAVE RESULTS
 // Called by the BullMQ worker — not directly by routes
 // ─────────────────────────────────────────────
@@ -383,6 +536,15 @@ export async function runAndSaveScan(domainId: string, tenantId: string) {
       dmarcRecord: result.dmarc.record,
       dmarcPolicy: result.dmarc.policy,
       dmarcPct: result.dmarc.pct,
+      // BIMI / MTA-STS / TLS-RPT — the three newer signals the checker now
+      // measures. Store both the raw record and the pass/none/invalid/error
+      // result so history and change-detection have the full picture.
+      bimiRecord: result.bimi.record,
+      bimiResult: result.bimi.result,
+      mtaStsRecord: result.mtaSts.record,
+      mtaStsResult: result.mtaSts.result,
+      tlsRptRecord: result.tlsRpt.record,
+      tlsRptResult: result.tlsRpt.result,
       overallScore: result.overallScore,
     },
   });
@@ -396,6 +558,13 @@ export async function runAndSaveScan(domainId: string, tenantId: string) {
       spfStatus: result.spf.result as any,
       dkimStatus: (result.dkim.some((d) => d.valid) ? "pass" : "fail") as any,
       dmarcStatus: result.dmarc.result as any,
+      // Mirror the three new signal results onto the domain so list/summary
+      // reads can badge them without loading the latest snapshot. unsubStatus
+      // is intentionally NOT touched here — it is derived from the per-domain
+      // unsubEnabled opt-in, not from DNS.
+      bimiStatus: result.bimi.result as any,
+      mtaStsStatus: result.mtaSts.result as any,
+      tlsRptStatus: result.tlsRpt.result as any,
       detectedEsp: detectedEsp ?? null,
       lastCheckedAt: new Date(),
     },

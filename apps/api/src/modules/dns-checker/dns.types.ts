@@ -32,12 +32,45 @@ export interface DmarcResult {
   issues: string[]; // Plain-English description of any problems
 }
 
+// ─────────────────────────────────────────────
+// BIMI / MTA-STS / TLS-RPT
+// These three are TXT-presence + syntax checks only (no HTTPS policy fetch),
+// so they keep the "structured data only, <5s per query" contract and reuse
+// resolveTxtWithTimeout. Their `result` shares the same value space:
+//   "pass"    — a syntactically valid record is present
+//   "none"    — no record found (domain simply hasn't adopted the signal)
+//   "invalid" — a record exists but the version prefix is wrong/malformed
+//   "error"   — the DNS query itself failed (network/timeout)
+// ─────────────────────────────────────────────
+
+export interface BimiResult {
+  record: string | null; // The raw BIMI TXT record
+  selector: string; // The BIMI selector queried (default is "default")
+  result: "pass" | "none" | "invalid" | "error";
+  issues: string[]; // Plain-English description of any problems
+}
+
+export interface MtaStsResult {
+  record: string | null; // The raw MTA-STS TXT record (the _mta-sts TXT, not the policy file)
+  result: "pass" | "none" | "invalid" | "error";
+  issues: string[];
+}
+
+export interface TlsRptResult {
+  record: string | null; // The raw TLS-RPT (SMTP TLS Reporting) TXT record
+  result: "pass" | "none" | "invalid" | "error";
+  issues: string[];
+}
+
 export interface DnsCheckResult {
   domain: string;
   checkedAt: Date;
   spf: SpfResult;
   dkim: DkimResult[];
   dmarc: DmarcResult;
+  bimi: BimiResult;
+  mtaSts: MtaStsResult;
+  tlsRpt: TlsRptResult;
   softFailures: string[]; // Future failures that haven't happened yet
   overallScore: number; // Health score 0-100
 }

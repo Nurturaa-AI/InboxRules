@@ -63,6 +63,10 @@ export const ListDomainsSchema = z.object({
     .enum(["all", "healthy", "warning", "critical"])
     .optional()
     .default("all"),
+
+  // Comma-separated list of relations to include (e.g. "snapshots")
+  // When "snapshots" is requested, the most recent snapshot is included
+  include: z.string().optional(),
 });
 
 // ─────────────────────────────────────────────
@@ -74,8 +78,29 @@ export const DomainIdParamSchema = z.object({
   id: z.string().uuid("Domain ID must be a valid UUID"),
 });
 
+// ─────────────────────────────────────────────
+// UNSUBSCRIBE HEADERS QUERY
+// GET /domains/:id/unsubscribe/headers?recipient=...
+//
+// List-Unsubscribe headers are per-recipient: the token encodes
+// `domainId:recipientEmail`, so a genuine header can only be produced for a
+// real recipient address. We require it rather than fabricating an example.
+// ─────────────────────────────────────────────
+
+export const UnsubscribeHeadersQuerySchema = z.object({
+  recipient: z
+    .string()
+    .min(1, "recipient is required")
+    .email("recipient must be a valid email address")
+    .toLowerCase()
+    .trim(),
+});
+
 // TypeScript types derived from the schemas
 // We use these types in our service and route files
 export type AddDomainInput = z.infer<typeof AddDomainSchema>;
 export type ListDomainsInput = z.infer<typeof ListDomainsSchema>;
 export type DomainIdParam = z.infer<typeof DomainIdParamSchema>;
+export type UnsubscribeHeadersQuery = z.infer<
+  typeof UnsubscribeHeadersQuerySchema
+>;

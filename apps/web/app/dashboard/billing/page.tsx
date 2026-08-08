@@ -19,7 +19,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { PageHeader } from "@/components/shared/PageHeader"
-import { FilterBar } from "@/components/shared/FilterBar"
 import { LoadingSkeleton } from "@/components/shared/LoadingSkeleton"
 
 // ── Types ──
@@ -50,7 +49,7 @@ type PlanIcon = typeof Zap
 
 interface Plan {
   name: string
-  price: { monthly: string; annual: string }
+  price: string
   period: string
   description: string
   icon: PlanIcon
@@ -59,10 +58,12 @@ interface Plan {
 }
 
 // ── Plans ──
+// Static marketing prices (monthly). Checkout does not accept a billing cycle,
+// so we advertise only the real monthly price.
 const PLANS: Plan[] = [
   {
     name: "Free",
-    price: { monthly: "$0", annual: "$0" },
+    price: "$0",
     period: "forever",
     description: "For individuals testing compliance",
     icon: Zap,
@@ -76,7 +77,7 @@ const PLANS: Plan[] = [
   },
   {
     name: "Pro",
-    price: { monthly: "$49", annual: "$39" },
+    price: "$49",
     period: "per month",
     description: "For businesses sending at scale",
     icon: Users,
@@ -93,7 +94,7 @@ const PLANS: Plan[] = [
   },
   {
     name: "Agency",
-    price: { monthly: "$199", annual: "$159" },
+    price: "$199",
     period: "per month",
     description: "For agencies managing multiple clients",
     icon: Building,
@@ -112,14 +113,6 @@ const PLANS: Plan[] = [
 
 const PLAN_LIMITS: Record<string, number> = { free: 3, pro: 50, agency: 500 }
 
-const BILLING_CYCLES: {
-  value: "monthly" | "annual"
-  label: React.ReactNode
-}[] = [
-  { value: "monthly", label: "Monthly" },
-  { value: "annual", label: "Annual −20%" },
-]
-
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4500"
 
 export default function BillingPage() {
@@ -128,15 +121,6 @@ export default function BillingPage() {
   // Fetch billing data — returns { subscription, usage } inside data
   const { data, loading, refetch } = useApiQuery<BillingResponse>("/billing")
 
-  // NOTE: The billing-cycle toggle is display-only. The checkout endpoint
-  // (POST /billing/checkout) accepts a `plan` key but NOT a billing cycle, so
-  // switching to "annual" only changes the displayed price — it does not change
-  // what Lemon Squeezy actually charges. Phase 2 backend dependency: extend the
-  // checkout payload/variants to support annual pricing before advertising it as
-  // a real option. Kept here for the price comparison only.
-  const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">(
-    "monthly"
-  )
   const [upgrading, setUpgrading] = useState<string | null>(null)
   const [portalLoading, setPortalLoading] = useState(false)
 
@@ -219,12 +203,17 @@ export default function BillingPage() {
     }
   }, [getToken])
 
-  const usageTiles = usage
+  // Domains is a real quota (used/limit → progress bar). Scans, AI calls, and
+  // unsubscribes have no per-plan cap, so show the real month-to-date count
+  // only — never a fabricated denominator.
+  const quotaTile = usage
+    ? { label: "Domains", used: usage.domains, total: domainLimit }
+    : null
+  const countTiles = usage
     ? [
-        { label: "Domains", used: usage.domains, total: domainLimit },
-        { label: "Scans / mo", used: usage.scans, total: domainLimit * 30 * 4 },
-        { label: "AI Calls", used: usage.aiCalls, total: 1000 },
-        { label: "Unsubscribes", used: usage.suppressions, total: 10000 },
+        { label: "Scans", value: usage.scans },
+        { label: "AI Calls", value: usage.aiCalls },
+        { label: "Unsubscribes", value: usage.suppressions },
       ]
     : []
 
@@ -296,70 +285,73 @@ export default function BillingPage() {
           {/* ── Usage stats ── */}
           {usage && (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {usageTiles.map((item) => {
-                const pct = Math.min(
-                  100,
-                  item.total > 0 ? (item.used / item.total) * 100 : 0
-                )
-                const barColor =
-                  pct >= 90
-                    ? "bg-danger"
-                    : pct >= 75
-                      ? "bg-warning"
-                      : "bg-primary"
-                return (
-                  <Card key={item.label} className="gap-3 p-5">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-muted-foreground">
-                        {item.label}
+              {quotaTile &&
+                (() => {
+                  const pct = Math.min(
+                    100,
+                    quotaTile.total > 0
+                      ? (quotaTile.used / quotaTile.total) * 100
+                      : 0
+                  )
+                  const barColor =
+                    pct >= 90
+                      ? "bg-danger"
+                      : pct >= 75
+                        ? "bg-warning"
+                        : "bg-primary"
+                  return (
+                    <Card className="gap-3 p-5">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium text-muted-foreground">
+                          {quotaTile.label}
+                        </p>
+                        <span className="font-mono text-xs font-semibold text-foreground tabular-nums">
+                          {quotaTile.used.toLocaleString()}/
+                          {quotaTile.total.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className={cn(
+                            "h-full rounded-full transition-[width] duration-500",
+                            barColor
+                          )}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {Math.round(pct)}% of plan limit
                       </p>
-                      <span className="font-mono text-xs font-semibold text-foreground tabular-nums">
-                        {item.used.toLocaleString()}/
-                        {item.total.toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className={cn(
-                          "h-full rounded-full transition-[width] duration-500",
-                          barColor
-                        )}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {Math.round(pct)}% used this month
-                    </p>
-                  </Card>
-                )
-              })}
+                    </Card>
+                  )
+                })()}
+
+              {countTiles.map((item) => (
+                <Card key={item.label} className="gap-3 p-5">
+                  <p className="text-sm font-medium text-muted-foreground">
+                    {item.label}
+                  </p>
+                  <p className="font-mono text-2xl font-semibold text-foreground tabular-nums">
+                    {item.value.toLocaleString()}
+                  </p>
+                  <p className="text-xs text-muted-foreground">This month</p>
+                </Card>
+              ))}
             </div>
           )}
 
           {/* ── Plan comparison ── */}
           <Card className="gap-0 p-0">
-            <CardHeader className="flex flex-col gap-3 border-b p-5 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <CardTitle className="text-sm">Plans</CardTitle>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Upgrade or downgrade anytime
-                </p>
-              </div>
-
-              {/* Billing cycle toggle (display-only — see note above) */}
-              <FilterBar
-                options={BILLING_CYCLES}
-                value={billingCycle}
-                onValueChange={setBillingCycle}
-                aria-label="Billing cycle"
-              />
+            <CardHeader className="border-b p-5">
+              <CardTitle className="text-sm">Plans</CardTitle>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Upgrade or downgrade anytime
+              </p>
             </CardHeader>
 
             <div className="grid divide-y divide-border md:grid-cols-3 md:divide-x md:divide-y-0">
               {PLANS.map((p) => {
                 const isCurrent = plan === p.name.toLowerCase()
-                const price =
-                  billingCycle === "annual" ? p.price.annual : p.price.monthly
                 const Icon = p.icon
 
                 return (
@@ -392,7 +384,7 @@ export default function BillingPage() {
 
                     <div className="mt-3.5 flex items-end gap-1">
                       <span className="font-mono text-3xl font-bold text-foreground">
-                        {price}
+                        {p.price}
                       </span>
                       <span className="mb-1 text-sm text-muted-foreground">
                         /{p.period}

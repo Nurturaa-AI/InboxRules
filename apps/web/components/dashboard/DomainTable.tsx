@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState } from "react"
 import {
   RefreshCw,
   ExternalLink,
@@ -12,6 +12,7 @@ import {
 import { useAuth } from "@clerk/nextjs"
 import { toast } from "sonner"
 
+import { useApiQuery, apiRequest, refreshAllQueries } from "@/lib/useApiQuery"
 import { timeAgo } from "@/lib/utils"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -50,60 +51,32 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: "critical", label: "Critical" },
 ]
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4500"
-
 export default function DomainTable({ onAddDomain }: Props) {
   const { getToken } = useAuth()
 
-  const [domains, setDomains] = useState<Domain[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  // Shared, refresh-aware query — participates in refreshAllQueries() so a
+  // mutation anywhere on the dashboard re-runs this fetch automatically.
+  const { data, loading, error, refetch } = useApiQuery<Domain[]>("/domains")
+  const domains = data ?? []
+
   const [filter, setFilter] = useState<Filter>("all")
   const [scanning, setScanning] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<Domain | null>(null)
-
-  const fetchDomains = useCallback(async () => {
-    try {
-      setLoading(true)
-      setError(null)
-
-      const token = await getToken()
-      const response = await fetch(`${API_URL}/api/v1/domains`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-
-      if (!response.ok) throw new Error("Failed to fetch domains")
-
-      const data = await response.json()
-      setDomains(data.data || [])
-    } catch (err: unknown) {
-      setError((err as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }, [getToken])
-
-  useEffect(() => {
-    void Promise.resolve().then(() => fetchDomains())
-  }, [fetchDomains])
 
   // Trigger a manual scan
   async function handleScan(id: string, name: string) {
     setScanning(id)
     try {
       const token = await getToken()
-      const res = await fetch(`${API_URL}/api/v1/domains/${id}/scan`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!res.ok) throw new Error("Scan request failed")
+      if (!token) throw new Error("Not authenticated")
+      await apiRequest(`/domains/${id}/scan`, "POST", token)
       toast.success(`Scanning ${name}…`, {
         description: "Results refresh in a few seconds.",
       })
-      // Refresh after 3 seconds to show updated score
+      // Refresh the whole dashboard after 3s to show the updated score.
       setTimeout(() => {
-        fetchDomains()
+        refreshAllQueries()
         setScanning(null)
       }, 3000)
     } catch (err) {
@@ -119,13 +92,10 @@ export default function DomainTable({ onAddDomain }: Props) {
     setDeleting(domain.id)
     try {
       const token = await getToken()
-      const res = await fetch(`${API_URL}/api/v1/domains/${domain.id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!res.ok) throw new Error("Delete request failed")
-      setDomains((prev) => prev.filter((d) => d.id !== domain.id))
+      if (!token) throw new Error("Not authenticated")
+      await apiRequest(`/domains/${domain.id}`, "DELETE", token)
       toast.success(`${domain.domain} removed from monitoring`)
+      refreshAllQueries()
     } catch (err) {
       toast.error("Failed to remove domain", {
         description: err instanceof Error ? err.message : undefined,
@@ -245,7 +215,7 @@ export default function DomainTable({ onAddDomain }: Props) {
           <Button
             variant="outline"
             size="icon-sm"
-            onClick={fetchDomains}
+            onClick={refetch}
             aria-label="Refresh domains"
           >
             <RefreshCw className={loading ? "animate-spin" : ""} />
@@ -282,7 +252,7 @@ export default function DomainTable({ onAddDomain }: Props) {
             title="Failed to load domains"
             description={error}
             action={
-              <Button variant="outline" size="sm" onClick={fetchDomains}>
+              <Button variant="outline" size="sm" onClick={refetch}>
                 <RefreshCw />
                 Try again
               </Button>

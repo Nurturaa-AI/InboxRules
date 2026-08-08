@@ -1,10 +1,11 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState } from "react"
 import Link from "next/link"
 import { useAuth } from "@clerk/nextjs"
 import { CheckCircle2, RefreshCw } from "lucide-react"
 
+import { useApiQuery, apiRequest, refreshAllQueries } from "@/lib/useApiQuery"
 import { timeAgo } from "@/lib/utils"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -29,55 +30,31 @@ const CHANGE_LABELS: Record<string, string> = {
   dkim_key_rotated: "DKIM Key Rotated",
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4500"
-
 export default function AlertsFeed() {
   const { getToken } = useAuth()
-  const [alerts, setAlerts] = useState<AlertEvent[]>([])
-  const [loading, setLoading] = useState(true)
 
-  // useCallback so useEffect dependency is stable
-  const fetchAlerts = useCallback(async () => {
-    try {
-      setLoading(true)
-      const token = await getToken()
-      if (!token) return
-      const response = await fetch(
-        `${API_URL}/api/v1/alerts?status=unresolved&limit=4`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      )
-      if (!response.ok) return
-      const data = await response.json()
-      // Handle both { data: [] } and { items: [] } shapes
-      setAlerts(data.data || data.items || [])
-    } catch {
-      // fail silently — show empty state
-    } finally {
-      setLoading(false)
-    }
-  }, [getToken])
+  // Shared, refresh-aware query — participates in refreshAllQueries() so a
+  // mutation anywhere on the dashboard re-runs this fetch automatically.
+  const { data, loading } = useApiQuery<AlertEvent[]>(
+    "/alerts?status=unresolved&limit=4"
+  )
+  const alerts = data ?? []
 
-  useEffect(() => {
-    let isActive = true
-    Promise.resolve().then(() => {
-      if (isActive) void fetchAlerts()
-    })
-    return () => {
-      isActive = false
-    }
-  }, [fetchAlerts])
+  // Acknowledge an alert, then refresh the dashboard so this feed (and the
+  // alert counts elsewhere) reflect the change.
+  const [acknowledging, setAcknowledging] = useState<string | null>(null)
 
   async function acknowledgeAlert(id: string) {
+    setAcknowledging(id)
     try {
       const token = await getToken()
       if (!token) return
-      await fetch(`${API_URL}/api/v1/alerts/${id}/acknowledge`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      setAlerts((prev) => prev.filter((a) => a.id !== id))
+      await apiRequest(`/alerts/${id}/acknowledge`, "POST", token)
+      refreshAllQueries()
     } catch {
       // fail silently
+    } finally {
+      setAcknowledging(null)
     }
   }
 
@@ -158,6 +135,7 @@ export default function AlertsFeed() {
                 variant="outline"
                 size="xs"
                 onClick={() => acknowledgeAlert(alert.id)}
+                disabled={acknowledging === alert.id}
                 aria-label={`Acknowledge alert: ${title}`}
                 className="shrink-0"
               >

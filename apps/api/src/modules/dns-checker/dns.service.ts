@@ -12,6 +12,9 @@ import {
   SpfResult,
   DkimResult,
   DmarcResult,
+  BimiResult,
+  MtaStsResult,
+  TlsRptResult,
 } from "./dns.types";
 
 // ─────────────────────────────────────────────
@@ -89,12 +92,17 @@ export async function checkDomain(domain: string): Promise<DnsCheckResult> {
     return createErrorResult(domain, "Invalid domain format");
   }
 
-  // Run all three checks at the same time (parallel)
-  // This is faster than running them one after another
-  const [spf, dkim, dmarc] = await Promise.allSettled([
+  // Run every check at the same time (parallel)
+  // This is faster than running them one after another. BIMI, MTA-STS and
+  // TLS-RPT are TXT-presence + syntax checks only, so they stay within the
+  // same <5s-per-query, structured-data-only contract as SPF/DKIM/DMARC.
+  const [spf, dkim, dmarc, bimi, mtaSts, tlsRpt] = await Promise.allSettled([
     checkSpf(domain),
     checkDkim(domain),
     checkDmarc(domain),
+    checkBimi(domain),
+    checkMtaSts(domain),
+    checkTlsRpt(domain),
   ]);
 
   // Extract the results, handling the case where any check threw an error
@@ -108,6 +116,19 @@ export async function checkDomain(domain: string): Promise<DnsCheckResult> {
   const dmarcResult =
     dmarc.status === "fulfilled" ? dmarc.value : createDmarcError(dmarc.reason);
 
+  const bimiResult =
+    bimi.status === "fulfilled" ? bimi.value : createBimiError(bimi.reason);
+
+  const mtaStsResult =
+    mtaSts.status === "fulfilled"
+      ? mtaSts.value
+      : createMtaStsError(mtaSts.reason);
+
+  const tlsRptResult =
+    tlsRpt.status === "fulfilled"
+      ? tlsRpt.value
+      : createTlsRptError(tlsRpt.reason);
+
   // Detect soft failures — problems that don't fail today but will fail soon
   const softFailures = detectSoftFailures(spfResult, dkimResult, dmarcResult);
 
@@ -116,6 +137,9 @@ export async function checkDomain(domain: string): Promise<DnsCheckResult> {
     spfResult,
     dkimResult,
     dmarcResult,
+    bimiResult,
+    mtaStsResult,
+    tlsRptResult,
     softFailures,
   );
 
@@ -125,6 +149,9 @@ export async function checkDomain(domain: string): Promise<DnsCheckResult> {
     spf: spfResult,
     dkim: dkimResult,
     dmarc: dmarcResult,
+    bimi: bimiResult,
+    mtaSts: mtaStsResult,
+    tlsRpt: tlsRptResult,
     softFailures,
     overallScore,
   };
@@ -591,6 +618,153 @@ async function checkDmarc(domain: string): Promise<DmarcResult> {
 }
 
 // ─────────────────────────────────────────────
+// BIMI CHECK
+// ─────────────────────────────────────────────
+
+/**
+ * Checks the BIMI record for a domain.
+ * BIMI (Brand Indicators for Message Identification) lets a domain publish a
+ * logo that supporting inboxes display next to authenticated mail. This is a
+ * TXT-presence + syntax check only — we confirm a v=BIMI1 record exists at the
+ * default selector; we do not fetch the referenced SVG/VMC over HTTPS.
+ */
+async function checkBimi(domain: string): Promise<BimiResult> {
+  // BIMI records live at <selector>._bimi.domain; "default" is the standard selector
+  const selector = "default";
+  const bimiDomain = `${selector}._bimi.${domain}`;
+
+  let txtRecords: string[][];
+
+  try {
+    txtRecords = await resolveTxtWithTimeout(bimiDomain);
+  } catch (err: any) {
+    if (err.code === "ENOTFOUND" || err.code === "ENODATA") {
+      return {
+        record: null,
+        selector,
+        result: "none",
+        issues: [
+          "No BIMI record found. BIMI is optional, but publishing one lets " +
+            "supporting inboxes (Gmail, Apple Mail, Yahoo) show your brand logo " +
+            "next to authenticated mail. It requires DMARC at enforcement first.",
+        ],
+      };
+    }
+    throw new Error(`BIMI DNS query failed: ${err.message}`);
+  }
+
+  const record = txtRecords.map((chunks) => chunks.join("")).join("");
+
+  if (!record.startsWith("v=BIMI1")) {
+    return {
+      record,
+      selector,
+      result: "invalid",
+      issues: [
+        "Record at default._bimi does not appear to be a valid BIMI record (must start with v=BIMI1)",
+      ],
+    };
+  }
+
+  return { record, selector, result: "pass", issues: [] };
+}
+
+// ─────────────────────────────────────────────
+// MTA-STS CHECK
+// ─────────────────────────────────────────────
+
+/**
+ * Checks the MTA-STS record for a domain.
+ * MTA-STS (SMTP MTA Strict Transport Security) lets a domain require TLS for
+ * inbound SMTP. This is a TXT-presence + syntax check on the _mta-sts TXT
+ * record only — we confirm a v=STSv1 record exists; we do not fetch the
+ * HTTPS-hosted policy file.
+ */
+async function checkMtaSts(domain: string): Promise<MtaStsResult> {
+  const mtaStsDomain = `_mta-sts.${domain}`;
+
+  let txtRecords: string[][];
+
+  try {
+    txtRecords = await resolveTxtWithTimeout(mtaStsDomain);
+  } catch (err: any) {
+    if (err.code === "ENOTFOUND" || err.code === "ENODATA") {
+      return {
+        record: null,
+        result: "none",
+        issues: [
+          "No MTA-STS record found. MTA-STS is optional, but publishing it tells " +
+            "sending servers to require TLS for mail to your domain, protecting " +
+            "against downgrade and man-in-the-middle attacks.",
+        ],
+      };
+    }
+    throw new Error(`MTA-STS DNS query failed: ${err.message}`);
+  }
+
+  const record = txtRecords.map((chunks) => chunks.join("")).join("");
+
+  if (!record.startsWith("v=STSv1")) {
+    return {
+      record,
+      result: "invalid",
+      issues: [
+        "Record at _mta-sts does not appear to be a valid MTA-STS record (must start with v=STSv1)",
+      ],
+    };
+  }
+
+  return { record, result: "pass", issues: [] };
+}
+
+// ─────────────────────────────────────────────
+// TLS-RPT CHECK
+// ─────────────────────────────────────────────
+
+/**
+ * Checks the TLS-RPT record for a domain.
+ * TLS-RPT (SMTP TLS Reporting) lets a domain receive reports about TLS
+ * negotiation failures for inbound mail. This is a TXT-presence + syntax check
+ * only — we confirm a v=TLSRPTv1 record exists at _smtp._tls.
+ */
+async function checkTlsRpt(domain: string): Promise<TlsRptResult> {
+  const tlsRptDomain = `_smtp._tls.${domain}`;
+
+  let txtRecords: string[][];
+
+  try {
+    txtRecords = await resolveTxtWithTimeout(tlsRptDomain);
+  } catch (err: any) {
+    if (err.code === "ENOTFOUND" || err.code === "ENODATA") {
+      return {
+        record: null,
+        result: "none",
+        issues: [
+          "No TLS-RPT record found. TLS-RPT is optional, but publishing it lets " +
+            "you receive reports when sending servers fail to establish TLS with " +
+            "your mail servers — useful alongside MTA-STS.",
+        ],
+      };
+    }
+    throw new Error(`TLS-RPT DNS query failed: ${err.message}`);
+  }
+
+  const record = txtRecords.map((chunks) => chunks.join("")).join("");
+
+  if (!record.startsWith("v=TLSRPTv1")) {
+    return {
+      record,
+      result: "invalid",
+      issues: [
+        "Record at _smtp._tls does not appear to be a valid TLS-RPT record (must start with v=TLSRPTv1)",
+      ],
+    };
+  }
+
+  return { record, result: "pass", issues: [] };
+}
+
+// ─────────────────────────────────────────────
 // SOFT FAILURE DETECTION
 // ─────────────────────────────────────────────
 
@@ -660,33 +834,44 @@ function detectSoftFailures(
  * Calculates a health score from 0 to 100.
  * This gives users an at-a-glance view of their compliance status.
  *
- * Score breakdown:
- * - SPF passing:    30 points
- * - DKIM valid:     30 points
- * - DMARC present:  20 points
+ * The score spreads across the six signals we actually measure. The three
+ * newer signals (BIMI, MTA-STS, TLS-RPT) are lighter-weighted than the core
+ * authentication trio because they are complementary hardening rather than
+ * baseline deliverability requirements.
+ *
+ * Score breakdown (sums to 100 before soft-failure deductions):
+ * - SPF passing:     25 points (softfail: 12 partial credit)
+ * - DKIM valid:      25 points (+5 bonus for strong 2048-bit+ keys)
+ * - DMARC present:   15 points
  * - DMARC enforcing: 10 points (quarantine or reject)
- * - No soft failures: 10 points
+ * - BIMI present:     5 points
+ * - MTA-STS present:  8 points
+ * - TLS-RPT present:  7 points
+ * Then: −5 per soft failure (max −10). Clamped to 0–100.
  */
 function calculateHealthScore(
   spf: SpfResult,
   dkim: DkimResult[],
   dmarc: DmarcResult,
+  bimi: BimiResult,
+  mtaSts: MtaStsResult,
+  tlsRpt: TlsRptResult,
   softFailures: string[],
 ): number {
   let score = 0;
 
-  // SPF: 30 points for passing
+  // SPF: 25 points for passing
   if (spf.result === "pass") {
-    score += 30;
+    score += 25;
   } else if (spf.result === "softfail") {
     // Give partial credit for softfail — it's better than nothing
-    score += 15;
+    score += 12;
   }
 
-  // DKIM: 30 points for at least one valid DKIM key
+  // DKIM: 25 points for at least one valid DKIM key
   const validDkimKeys = dkim.filter((d) => d.valid);
   if (validDkimKeys.length > 0) {
-    score += 30;
+    score += 25;
     // Bonus: extra points for strong keys (2048-bit+)
     const strongKeys = validDkimKeys.filter((d) => d.keyBits >= 2048);
     if (strongKeys.length > 0) {
@@ -694,14 +879,29 @@ function calculateHealthScore(
     }
   }
 
-  // DMARC: 20 points for having a record at all
+  // DMARC: 15 points for having a record at all
   if (dmarc.result !== "missing" && dmarc.result !== "invalid") {
-    score += 20;
+    score += 15;
   }
 
   // DMARC enforcement: 10 more points for quarantine or reject policy
   if (dmarc.policy === "quarantine" || dmarc.policy === "reject") {
     score += 10;
+  }
+
+  // BIMI: 5 points for a valid published record
+  if (bimi.result === "pass") {
+    score += 5;
+  }
+
+  // MTA-STS: 8 points for a valid published record
+  if (mtaSts.result === "pass") {
+    score += 8;
+  }
+
+  // TLS-RPT: 7 points for a valid published record
+  if (tlsRpt.result === "pass") {
+    score += 7;
   }
 
   // Soft failures: deduct 5 points each, max deduction 10
@@ -813,6 +1013,9 @@ function createErrorResult(domain: string, message: string): DnsCheckResult {
     spf: createSpfError(message),
     dkim: [],
     dmarc: createDmarcError(message),
+    bimi: createBimiError(message),
+    mtaSts: createMtaStsError(message),
+    tlsRpt: createTlsRptError(message),
     softFailures: [],
     overallScore: 0,
   };
@@ -841,5 +1044,30 @@ function createDmarcError(error: any): DmarcResult {
     ruaAddresses: [],
     rufAddresses: [],
     issues: [`DMARC check failed: ${error?.message || error}`],
+  };
+}
+
+function createBimiError(error: any): BimiResult {
+  return {
+    record: null,
+    selector: "default",
+    result: "error",
+    issues: [`BIMI check failed: ${error?.message || error}`],
+  };
+}
+
+function createMtaStsError(error: any): MtaStsResult {
+  return {
+    record: null,
+    result: "error",
+    issues: [`MTA-STS check failed: ${error?.message || error}`],
+  };
+}
+
+function createTlsRptError(error: any): TlsRptResult {
+  return {
+    record: null,
+    result: "error",
+    issues: [`TLS-RPT check failed: ${error?.message || error}`],
   };
 }

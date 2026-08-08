@@ -12,6 +12,7 @@
 
 import { genAI } from "./gemini";
 import db from "../../db";
+import { redact } from "../../lib/redact";
 
 // ─────────────────────────────────────────────
 // TYPES
@@ -166,7 +167,7 @@ Give 2-4 fix steps maximum. Be specific to the ESP if known.`;
     // If the AI call fails for any reason (network, quota, parse error)
     // return a basic fallback explanation so the alert still goes out
     // The user gets SOME information rather than nothing
-    console.error("[AI] Alert explainer failed:", err.message);
+    console.error("[AI] Alert explainer failed:", redact(err));
     return buildFallbackExplanation(context);
   }
 }
@@ -270,6 +271,6 @@ async function logAiUsage(data: {
     });
   } catch (err: any) {
     // Never let usage logging crash the main flow
-    console.error("[AI] Failed to log usage:", err.message);
+    console.error("[AI] Failed to log usage:", redact(err));
   }
 }

@@ -9,11 +9,11 @@
 // Business logic lives in domains.service.ts — not here.
 
 import { FastifyInstance } from "fastify";
-import { z } from "zod";
 import {
   AddDomainSchema,
   ListDomainsSchema,
   DomainIdParamSchema,
+  UnsubscribeHeadersQuerySchema,
 } from "./domains.schema";
 import {
   addDomain,
@@ -21,6 +21,9 @@ import {
   getDomain,
   triggerScan,
   deleteDomain,
+  enableUnsubscribe,
+  disableUnsubscribe,
+  getUnsubscribeHeaders,
 } from "./domains.service";
 
 export async function domainRoutes(app: FastifyInstance) {
@@ -277,6 +280,189 @@ export async function domainRoutes(app: FastifyInstance) {
         error: {
           code: "INTERNAL_ERROR",
           message: "Failed to remove domain. Please try again.",
+        },
+      });
+    }
+  });
+
+  // ─────────────────────────────────────────────
+  // POST /api/v1/domains/:id/unsubscribe/enable
+  // Turn on RFC 8058 one-click unsubscribe for this domain.
+  // After enabling, the tenant should attach the headers returned by
+  // GET /:id/unsubscribe/headers to mail sent from this domain.
+  // ─────────────────────────────────────────────
+  app.post("/:id/unsubscribe/enable", async (request, reply) => {
+    const parseResult = DomainIdParamSchema.safeParse(request.params);
+
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: {
+          code: "INVALID_DOMAIN_ID",
+          message: "Domain ID must be a valid UUID",
+        },
+      });
+    }
+
+    const tenantId = request.tenantId;
+    const { id } = parseResult.data;
+
+    try {
+      const domain = await enableUnsubscribe(tenantId, id);
+
+      if (!domain) {
+        return reply.status(404).send({
+          error: {
+            code: "DOMAIN_NOT_FOUND",
+            message: "Domain not found",
+          },
+        });
+      }
+
+      return reply.status(200).send({
+        data: {
+          unsubEnabled: domain.unsubEnabled,
+          unsubEnabledAt: domain.unsubEnabledAt,
+          unsubStatus: domain.unsubStatus,
+        },
+        message: "One-click unsubscribe enabled for this domain.",
+      });
+    } catch (err: any) {
+      app.log.error(
+        { err, tenantId, domainId: id },
+        "Failed to enable unsubscribe",
+      );
+      return reply.status(500).send({
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Failed to enable one-click unsubscribe. Please try again.",
+        },
+      });
+    }
+  });
+
+  // ─────────────────────────────────────────────
+  // POST /api/v1/domains/:id/unsubscribe/disable
+  // Turn off one-click unsubscribe for this domain.
+  // ─────────────────────────────────────────────
+  app.post("/:id/unsubscribe/disable", async (request, reply) => {
+    const parseResult = DomainIdParamSchema.safeParse(request.params);
+
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: {
+          code: "INVALID_DOMAIN_ID",
+          message: "Domain ID must be a valid UUID",
+        },
+      });
+    }
+
+    const tenantId = request.tenantId;
+    const { id } = parseResult.data;
+
+    try {
+      const domain = await disableUnsubscribe(tenantId, id);
+
+      if (!domain) {
+        return reply.status(404).send({
+          error: {
+            code: "DOMAIN_NOT_FOUND",
+            message: "Domain not found",
+          },
+        });
+      }
+
+      return reply.status(200).send({
+        data: {
+          unsubEnabled: domain.unsubEnabled,
+          unsubStatus: domain.unsubStatus,
+        },
+        message: "One-click unsubscribe disabled for this domain.",
+      });
+    } catch (err: any) {
+      app.log.error(
+        { err, tenantId, domainId: id },
+        "Failed to disable unsubscribe",
+      );
+      return reply.status(500).send({
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Failed to disable one-click unsubscribe. Please try again.",
+        },
+      });
+    }
+  });
+
+  // ─────────────────────────────────────────────
+  // GET /api/v1/domains/:id/unsubscribe/headers?recipient=user@example.com
+  // Return the genuine List-Unsubscribe / List-Unsubscribe-Post headers to
+  // send when mailing `recipient` from this domain. The token is per-recipient
+  // (it encodes domainId:recipientEmail), so a real recipient is required — we
+  // do not fabricate an example address. Only available once enabled.
+  // ─────────────────────────────────────────────
+  app.get("/:id/unsubscribe/headers", async (request, reply) => {
+    const paramResult = DomainIdParamSchema.safeParse(request.params);
+
+    if (!paramResult.success) {
+      return reply.status(400).send({
+        error: {
+          code: "INVALID_DOMAIN_ID",
+          message: "Domain ID must be a valid UUID",
+        },
+      });
+    }
+
+    const queryResult = UnsubscribeHeadersQuerySchema.safeParse(request.query);
+
+    if (!queryResult.success) {
+      return reply.status(400).send({
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Invalid query parameters",
+          details: queryResult.error.issues,
+        },
+      });
+    }
+
+    const tenantId = request.tenantId;
+    const { id } = paramResult.data;
+    const { recipient } = queryResult.data;
+
+    try {
+      const result = await getUnsubscribeHeaders(tenantId, id, recipient);
+
+      if (!result) {
+        return reply.status(404).send({
+          error: {
+            code: "DOMAIN_NOT_FOUND",
+            message: "Domain not found",
+          },
+        });
+      }
+
+      if ("notEnabled" in result) {
+        return reply.status(403).send({
+          error: {
+            code: "UNSUBSCRIBE_NOT_ENABLED",
+            message: "One-click unsubscribe not enabled for this domain",
+          },
+        });
+      }
+
+      return reply.status(200).send({
+        data: {
+          listUnsubscribe: result.listUnsubscribe,
+          listUnsubscribePost: result.listUnsubscribePost,
+        },
+      });
+    } catch (err: any) {
+      app.log.error(
+        { err, tenantId, domainId: id },
+        "Failed to build unsubscribe headers",
+      );
+      return reply.status(500).send({
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Failed to generate unsubscribe headers. Please try again.",
         },
       });
     }
