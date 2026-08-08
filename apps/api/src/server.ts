@@ -8,7 +8,7 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import { domainRoutes } from "./modules/domains/domains.routes";
-import { authMiddleware } from "./middleware/auth";
+import { authMiddleware, warmJwks } from "./middleware/auth";
 import redis from "./redis";
 
 // Worker imports — these run in the same process during development
@@ -198,6 +198,12 @@ async function start() {
     console.log(` InboxRules API running on port ${port}`);
     console.log(`   Health check: http://localhost:${port}/health`);
     console.log(`   Environment: ${process.env.NODE_ENV || "development"}`);
+
+    // Pre-warm Clerk's JWKS in the background so the first authenticated
+    // request doesn't race on the cold fetch (the ~5s "request timed out" 401
+    // burst right after startup). Not awaited — the server is already accepting
+    // connections and this is best-effort.
+    void warmJwks();
 
     // ─────────────────────────────────────────────
     // START BACKGROUND WORKERS

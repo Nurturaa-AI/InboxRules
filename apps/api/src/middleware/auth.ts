@@ -49,9 +49,33 @@ let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 function getJwks() {
   if (!jwks) {
     const url = getJwksUrl();
-    jwks = createRemoteJWKSet(new URL(url));
+    jwks = createRemoteJWKSet(new URL(url), {
+      // Clerk's JWKS endpoint can be slow on the very first hit (cold DNS +
+      // TLS handshake). jose's default fetch timeout is 5s, and when a batch of
+      // requests races on that first uncached fetch they ALL fail together —
+      // exactly the wave of ~5000ms "request timed out" 401s seen right after a
+      // cold start. Give the network more headroom; steady-state requests are
+      // served from jose's in-memory cache and never wait on this.
+      timeoutDuration: 10_000,
+    });
   }
   return jwks;
+}
+
+// Pre-fetch Clerk's JWKS once at boot so the first real authenticated request
+// doesn't pay the cold-fetch latency (otherwise seen as a burst of ~5s 401s
+// immediately after startup). Best-effort: if Clerk is unreachable we log and
+// carry on — the normal per-request path will fetch (and retry) later.
+export async function warmJwks(): Promise<void> {
+  try {
+    await getJwks().reload();
+    console.log("[auth] Clerk JWKS pre-warmed");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.warn(
+      `[auth] JWKS pre-warm failed (will fetch on first request): ${message}`,
+    );
+  }
 }
 
 // Decides whether a token's `azp` (authorized party = frontend origin) is one

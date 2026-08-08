@@ -290,6 +290,18 @@ export async function getDomain(tenantId: string, domainId: string) {
 // TRIGGER A MANUAL SCAN
 // ─────────────────────────────────────────────
 
+// Thrown when the scan queue (Redis/BullMQ) can't be reached — e.g. Upstash's
+// free tier returns "temporarily rate-limited", or Redis is briefly down. The
+// route layer maps this to a 503 ("try again shortly") instead of a bare 500,
+// so a throttled queue doesn't look like the API crashing. The original error
+// is preserved as `cause` for server-side logging (never sent to the client).
+export class QueueUnavailableError extends Error {
+  constructor(cause?: unknown) {
+    super("Scan queue is temporarily unavailable", { cause });
+    this.name = "QueueUnavailableError";
+  }
+}
+
 export async function triggerScan(tenantId: string, domainId: string) {
   // Verify domain exists and belongs to this tenant
   const domain = await db.domain.findFirst({
@@ -304,37 +316,46 @@ export async function triggerScan(tenantId: string, domainId: string) {
     return null;
   }
 
-  // Check if there is already a pending scan for this domain
-  // We do not want to queue duplicate scans
-  const existingJob = await dnsPollQueue.getJob(`manual-scan-${domainId}`);
+  // The dedup check and the enqueue both talk to Redis, so they share one
+  // guard: if the queue is throttled or unreachable we raise a typed error the
+  // route turns into a 503. The domain lookup above and the audit write below
+  // are Postgres, deliberately left outside this guard — their failures are
+  // genuine 500s, not "queue busy".
+  try {
+    // Check if there is already a pending scan for this domain
+    // We do not want to queue duplicate scans
+    const existingJob = await dnsPollQueue.getJob(`manual-scan-${domainId}`);
 
-  if (existingJob) {
-    const state = await existingJob.getState();
-    // If job is waiting or active, do not queue another one
-    if (state === "waiting" || state === "active") {
-      return {
-        domain,
-        message: "A scan is already in progress for this domain",
-        alreadyQueued: true,
-      };
+    if (existingJob) {
+      const state = await existingJob.getState();
+      // If job is waiting or active, do not queue another one
+      if (state === "waiting" || state === "active") {
+        return {
+          domain,
+          message: "A scan is already in progress for this domain",
+          alreadyQueued: true,
+        };
+      }
     }
-  }
 
-  // Queue the scan job
-  await dnsPollQueue.add(
-    "scan-domain",
-    {
-      domainId: domain.id,
-      tenantId,
-      triggeredBy: "manual",
-    },
-    {
-      // Use a predictable job ID so we can check for it above
-      jobId: `manual-scan-${domainId}`,
-      // No delay — run immediately
-      delay: 0,
-    },
-  );
+    // Queue the scan job
+    await dnsPollQueue.add(
+      "scan-domain",
+      {
+        domainId: domain.id,
+        tenantId,
+        triggeredBy: "manual",
+      },
+      {
+        // Use a predictable job ID so we can check for it above
+        jobId: `manual-scan-${domainId}`,
+        // No delay — run immediately
+        delay: 0,
+      },
+    );
+  } catch (err) {
+    throw new QueueUnavailableError(err);
+  }
 
   // Write audit log
   await db.auditLog.create({
