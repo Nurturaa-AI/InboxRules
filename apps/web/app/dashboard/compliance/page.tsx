@@ -288,23 +288,27 @@ export default function CompliancePage() {
       {/* Summary */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
+          variant="primary"
           label="Total"
           value={loading ? "—" : domains.length}
           icon={LayoutGrid}
         />
         <MetricCard
+          variant="success"
           label="Compliant"
           value={loading ? "—" : compliant}
           icon={ShieldCheck}
           hint="Score ≥ 80"
         />
         <MetricCard
+          variant="warning"
           label="Warning"
           value={loading ? "—" : warning}
           icon={ShieldAlert}
           hint="Score 60–79"
         />
         <MetricCard
+          variant="danger"
           label="Critical"
           value={loading ? "—" : critical}
           icon={ShieldX}

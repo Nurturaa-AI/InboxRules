@@ -226,18 +226,21 @@ export default function DomainsPage() {
       {/* Summary */}
       <div className="grid gap-4 sm:grid-cols-3">
         <MetricCard
+          variant="success"
           label="Healthy"
           value={loading ? "—" : healthy}
           icon={ShieldCheck}
           hint="Score ≥ 80"
         />
         <MetricCard
+          variant="warning"
           label="Warning"
           value={loading ? "—" : warning}
           icon={AlertTriangle}
           hint="Score 60–79"
         />
         <MetricCard
+          variant="danger"
           label="Critical"
           value={loading ? "—" : critical}
           icon={XCircle}

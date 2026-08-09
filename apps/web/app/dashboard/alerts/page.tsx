@@ -321,14 +321,14 @@ export default function AlertsPage() {
 
                     {alert.aiFixSteps && alert.aiFixSteps.length > 0 && (
                       <div className="rounded-lg border border-info/30 bg-info-subtle p-3.5">
-                        <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-info-foreground">
+                        <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-info">
                           💡 How to fix it
                         </p>
                         <ol className="flex list-inside list-decimal flex-col gap-1.5 pl-1">
                           {alert.aiFixSteps.map((step, i) => (
                             <li
                               key={i}
-                              className="text-sm leading-relaxed text-info-foreground/90"
+                              className="text-sm leading-relaxed text-foreground"
                             >
                               {step}
                             </li>

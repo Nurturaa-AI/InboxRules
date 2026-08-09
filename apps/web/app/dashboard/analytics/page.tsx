@@ -175,23 +175,27 @@ export default function AnalyticsPage() {
       {/* KPI row — current domain state (shared ≥80/≥60/<60 thresholds) */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
+          variant="primary"
           label="Avg Health Score"
           value={domainsLoading ? "—" : avgScore}
           icon={Activity}
         />
         <MetricCard
+          variant="success"
           label="Healthy Domains"
           value={domainsLoading ? "—" : healthy}
           icon={ShieldCheck}
           hint="Score ≥ 80"
         />
         <MetricCard
+          variant="warning"
           label="Needs Attention"
           value={domainsLoading ? "—" : warning}
           icon={AlertTriangle}
           hint="Score 60–79"
         />
         <MetricCard
+          variant="danger"
           label="Critical Issues"
           value={domainsLoading ? "—" : critical}
           icon={XCircle}
