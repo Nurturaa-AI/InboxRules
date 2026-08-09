@@ -52,6 +52,22 @@
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
 
+  /* Card surface tints (very subtle tinted card backgrounds + matching
+     borders). Light mode carries the hierarchy; dark maps these back to the
+     neutral card so dark mode is unchanged. */
+  --color-card-primary: var(--card-primary);
+  --color-card-primary-border: var(--card-primary-border);
+  --color-card-success: var(--card-success);
+  --color-card-success-border: var(--card-success-border);
+  --color-card-warning: var(--card-warning);
+  --color-card-warning-border: var(--card-warning-border);
+  --color-card-danger: var(--card-danger);
+  --color-card-danger-border: var(--card-danger-border);
+  --color-card-info: var(--card-info);
+  --color-card-info-border: var(--card-info-border);
+  --color-card-neutral: var(--card-neutral);
+  --color-card-neutral-border: var(--card-neutral-border);
+
   /* Semantic status colors (solid / on-color / tinted surface) */
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
@@ -88,6 +104,24 @@
 
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.21 0.03 266);
+
+  /* Card surface tints — very subtle tinted surfaces for a light-mode card
+     hierarchy. Surfaces stay ≥ L0.97 so --card-foreground (L0.21) and
+     --muted-foreground (L0.55) keep strong contrast; borders are a touch
+     more saturated to define the edge. --card-neutral is the new soft-slate
+     default surface (still lifts off --background L0.985). */
+  --card-primary: oklch(0.975 0.018 274);
+  --card-primary-border: oklch(0.9 0.045 274);
+  --card-success: oklch(0.976 0.022 155);
+  --card-success-border: oklch(0.9 0.05 155);
+  --card-warning: oklch(0.977 0.032 85);
+  --card-warning-border: oklch(0.9 0.055 85);
+  --card-danger: oklch(0.975 0.02 27);
+  --card-danger-border: oklch(0.9 0.048 27);
+  --card-info: oklch(0.975 0.022 240);
+  --card-info-border: oklch(0.9 0.05 240);
+  --card-neutral: oklch(0.994 0.004 260);
+  --card-neutral-border: oklch(0.9 0.006 265);
 
   /* Brand — indigo, shared across light & dark */
   --primary: oklch(0.55 0.21 274);
@@ -156,6 +190,22 @@
 
   --popover: oklch(0.21 0.025 266);
   --popover-foreground: oklch(0.96 0.005 265);
+
+  /* Card surface tints — dark mode is intentionally unchanged: every card
+     tint resolves to the neutral card surface / border so variant cards look
+     identical to today. The light-mode hierarchy does not carry into dark. */
+  --card-primary: var(--card);
+  --card-primary-border: var(--border);
+  --card-success: var(--card);
+  --card-success-border: var(--border);
+  --card-warning: var(--card);
+  --card-warning-border: var(--border);
+  --card-danger: var(--card);
+  --card-danger-border: var(--border);
+  --card-info: var(--card);
+  --card-info-border: var(--border);
+  --card-neutral: var(--card);
+  --card-neutral-border: var(--border);
 
   --primary: oklch(0.62 0.19 274);
   --primary-foreground: oklch(0.99 0.003 265);

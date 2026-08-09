@@ -1,20 +1,46 @@
 import * as React from "react"
+import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
+
+// Card surface variants. Every variant resolves to a token pair
+// (bg-card-* + border-card-*-border) defined in globals.css. In light mode
+// these give a subtle semantic hierarchy — overview→primary, healthy→success,
+// warning→warning, critical→danger, informational→info, everything else→the
+// soft-slate neutral default. In dark mode every token maps back to the plain
+// card surface/border, so dark is visually unchanged.
+const cardVariants = cva(
+  "group/card flex flex-col gap-6 overflow-hidden rounded-xl border py-6 text-sm text-card-foreground shadow-sm has-[>img:first-child]:pt-0 data-[size=sm]:gap-4 data-[size=sm]:py-4 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
+  {
+    variants: {
+      variant: {
+        default: "border-card-neutral-border bg-card-neutral",
+        neutral: "border-card-neutral-border bg-card-neutral",
+        primary: "border-card-primary-border bg-card-primary",
+        success: "border-card-success-border bg-card-success",
+        warning: "border-card-warning-border bg-card-warning",
+        danger: "border-card-danger-border bg-card-danger",
+        info: "border-card-info-border bg-card-info",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+    },
+  }
+)
 
 function Card({
   className,
   size = "default",
+  variant,
   ...props
-}: React.ComponentProps<"div"> & { size?: "default" | "sm" }) {
+}: React.ComponentProps<"div"> &
+  VariantProps<typeof cardVariants> & { size?: "default" | "sm" }) {
   return (
     <div
       data-slot="card"
       data-size={size}
-      className={cn(
-        "group/card flex flex-col gap-6 overflow-hidden rounded-xl border border-border bg-card py-6 text-sm text-card-foreground shadow-sm has-[>img:first-child]:pt-0 data-[size=sm]:gap-4 data-[size=sm]:py-4 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
-        className
-      )}
+      className={cn(cardVariants({ variant }), className)}
       {...props}
     />
   )

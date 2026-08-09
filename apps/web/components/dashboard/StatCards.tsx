@@ -62,18 +62,21 @@ export default function StatCards() {
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <MetricCard
+        variant="primary"
         label="Total Domains"
         value={totalDomains}
         icon={Globe}
         hint={`${healthyDomains} healthy`}
       />
       <MetricCard
+        variant="success"
         label="Healthy Domains"
         value={healthyDomains}
         icon={ShieldCheck}
         hint={totalDomains > 0 ? `${healthyPct}% of total` : "No domains yet"}
       />
       <MetricCard
+        variant="warning"
         label="Active Alerts"
         value={unresolvedAlerts}
         icon={AlertTriangle}

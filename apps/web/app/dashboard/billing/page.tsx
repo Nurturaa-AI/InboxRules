@@ -243,7 +243,7 @@ export default function BillingPage() {
       ) : (
         <>
           {/* ── Current plan banner ── */}
-          <Card className="gap-0 border-primary/20 bg-primary/5 p-0">
+          <Card variant="primary" className="gap-0 p-0">
             <div className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-xs font-semibold tracking-wide text-primary uppercase">
@@ -299,8 +299,11 @@ export default function BillingPage() {
                       : pct >= 75
                         ? "bg-warning"
                         : "bg-primary"
+                  // Mirror the bar's severity on the card surface.
+                  const tileVariant =
+                    pct >= 90 ? "danger" : pct >= 75 ? "warning" : "primary"
                   return (
-                    <Card className="gap-3 p-5">
+                    <Card variant={tileVariant} className="gap-3 p-5">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-sm font-medium text-muted-foreground">
                           {quotaTile.label}
