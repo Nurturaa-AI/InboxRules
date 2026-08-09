@@ -9,6 +9,11 @@ const isPublicRoute = createRouteMatcher([
   "/sign-up(.*)",
   // Public landing page if you have one
   "/",
+  // Informational pages linked from the footer
+  "/docs",
+  "/support",
+  "/privacy",
+  "/terms",
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
