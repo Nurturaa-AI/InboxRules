@@ -261,18 +261,18 @@ Authorization is tenant-scoped rather than role-based in the request path. The `
 
 Ten models, all mapped to snake_case table names:
 
-| Model | Table | Purpose | Soft-delete |
-|-------|-------|---------|-------------|
-| `Tenant` | `tenants` | Customer account; root of multi-tenancy | Yes (`deletedAt`) |
-| `User` | `users` | Clerk-linked user belonging to a tenant | Yes |
-| `Domain` | `domains` | A monitored sending domain | Yes |
-| `DnsSnapshot` | `dns_snapshots` | Point-in-time DNS scan result | No |
-| `DnsChangeEvent` | `dns_change_events` | Detected change between snapshots | No |
-| `EmailAnalysis` | `email_analyses` | Parsed/analyzed email result | No |
-| `SuppressionEvent` | `suppression_events` | Recorded unsubscribe/suppression | No |
-| `UnsubscribeToken` | `unsubscribe_tokens` | Hashed one-click unsubscribe token | No |
-| `AiUsageLog` | `ai_usage_logs` | Per-call AI usage + cost | No |
-| `AuditLog` | `audit_logs` | Tenant action audit trail | No |
+| Model              | Table                | Purpose                                 | Soft-delete       |
+| ------------------ | -------------------- | --------------------------------------- | ----------------- |
+| `Tenant`           | `tenants`            | Customer account; root of multi-tenancy | Yes (`deletedAt`) |
+| `User`             | `users`              | Clerk-linked user belonging to a tenant | Yes               |
+| `Domain`           | `domains`            | A monitored sending domain              | Yes               |
+| `DnsSnapshot`      | `dns_snapshots`      | Point-in-time DNS scan result           | No                |
+| `DnsChangeEvent`   | `dns_change_events`  | Detected change between snapshots       | No                |
+| `EmailAnalysis`    | `email_analyses`     | Parsed/analyzed email result            | No                |
+| `SuppressionEvent` | `suppression_events` | Recorded unsubscribe/suppression        | No                |
+| `UnsubscribeToken` | `unsubscribe_tokens` | Hashed one-click unsubscribe token      | No                |
+| `AiUsageLog`       | `ai_usage_logs`      | Per-call AI usage + cost                | No                |
+| `AuditLog`         | `audit_logs`         | Tenant action audit trail               | No                |
 
 **Key fields by model:**
 
@@ -333,22 +333,22 @@ All `/api/v1/*` endpoints require a valid Clerk Bearer JWT. All responses follow
 
 ### 10.1 Health (public)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/health` | Liveness check. Returns `{ status, timestamp, version }`. |
+| Method | Path      | Description                                               |
+| ------ | --------- | --------------------------------------------------------- |
+| GET    | `/health` | Liveness check. Returns `{ status, timestamp, version }`. |
 
 ### 10.2 Domains (`/api/v1/domains`)
 
-| Method | Path | Success | Notable errors |
-|--------|------|---------|----------------|
-| POST | `/` | 201 | 400 `VALIDATION_ERROR`, 409 `DOMAIN_ALREADY_EXISTS`, 403 `PLAN_LIMIT_REACHED` |
-| GET | `/` | 200 | 400 `VALIDATION_ERROR` |
-| GET | `/:id` | 200 | 400 `INVALID_DOMAIN_ID`, 404 `DOMAIN_NOT_FOUND` |
-| POST | `/:id/scan` | 202 | 404 `DOMAIN_NOT_FOUND`, 503 `QUEUE_UNAVAILABLE` (with `Retry-After: 30`) |
-| DELETE | `/:id` | 200 | 404 `DOMAIN_NOT_FOUND` (soft-delete) |
-| POST | `/:id/unsubscribe/enable` | 200 | 404 `DOMAIN_NOT_FOUND` |
-| POST | `/:id/unsubscribe/disable` | 200 | 404 `DOMAIN_NOT_FOUND` |
-| GET | `/:id/unsubscribe/headers` | 200 | 400 `VALIDATION_ERROR`, 403 `UNSUBSCRIBE_NOT_ENABLED`, 404 `DOMAIN_NOT_FOUND` |
+| Method | Path                       | Success | Notable errors                                                                |
+| ------ | -------------------------- | ------- | ----------------------------------------------------------------------------- |
+| POST   | `/`                        | 201     | 400 `VALIDATION_ERROR`, 409 `DOMAIN_ALREADY_EXISTS`, 403 `PLAN_LIMIT_REACHED` |
+| GET    | `/`                        | 200     | 400 `VALIDATION_ERROR`                                                        |
+| GET    | `/:id`                     | 200     | 400 `INVALID_DOMAIN_ID`, 404 `DOMAIN_NOT_FOUND`                               |
+| POST   | `/:id/scan`                | 202     | 404 `DOMAIN_NOT_FOUND`, 503 `QUEUE_UNAVAILABLE` (with `Retry-After: 30`)      |
+| DELETE | `/:id`                     | 200     | 404 `DOMAIN_NOT_FOUND` (soft-delete)                                          |
+| POST   | `/:id/unsubscribe/enable`  | 200     | 404 `DOMAIN_NOT_FOUND`                                                        |
+| POST   | `/:id/unsubscribe/disable` | 200     | 404 `DOMAIN_NOT_FOUND`                                                        |
+| GET    | `/:id/unsubscribe/headers` | 200     | 400 `VALIDATION_ERROR`, 403 `UNSUBSCRIBE_NOT_ENABLED`, 404 `DOMAIN_NOT_FOUND` |
 
 - **`GET /`** query params: `limit`, `cursor`, `status`, `include` (validated by `ListDomainsSchema`).
 - **`POST /`** body: `{ domain }` (validated/normalized by `AddDomainSchema` — trimmed, lowercased, format-checked).
@@ -356,61 +356,61 @@ All `/api/v1/*` endpoints require a valid Clerk Bearer JWT. All responses follow
 
 ### 10.3 AI (`/api/v1/ai`)
 
-| Method | Path | Success | Notable errors |
-|--------|------|---------|----------------|
-| POST | `/analyze` | 200 (SSE stream) | 400 `VALIDATION_ERROR`, 429 `AI_QUOTA_EXCEEDED` |
-| POST | `/snippet` | 200 | 400 `VALIDATION_ERROR`, 429 `AI_QUOTA_EXCEEDED` |
+| Method | Path       | Success          | Notable errors                                  |
+| ------ | ---------- | ---------------- | ----------------------------------------------- |
+| POST   | `/analyze` | 200 (SSE stream) | 400 `VALIDATION_ERROR`, 429 `AI_QUOTA_EXCEEDED` |
+| POST   | `/snippet` | 200              | 400 `VALIDATION_ERROR`, 429 `AI_QUOTA_EXCEEDED` |
 
 - **`POST /analyze`** body: `{ domain }`. Quota is checked **before** the SSE stream opens (so an over-quota tenant gets a clean 429 rather than a half-open stream). The stream emits: `event: dns_result` (structured DNS check), repeated `event: ai_token` (`{ token }`), then `event: done` (`{}`); on failure `event: error` (`{ message }`).
 - **`POST /snippet`** body: `{ esp, domain, unsubscribeUrl, useCase }` where `useCase ∈ {marketing, transactional, cold_outreach}` (default `marketing`).
 
 ### 10.4 Suppression (`/api/v1/suppression`)
 
-| Method | Path | Success | Description |
-|--------|------|---------|-------------|
-| GET | `/` | 200 | List suppression events. Query: `limit` (max 100), `cursor`, `domainId`. Fails closed (401 `UNAUTHORIZED`) if `tenantId` is missing. |
+| Method | Path | Success | Description                                                                                                                          |
+| ------ | ---- | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| GET    | `/`  | 200     | List suppression events. Query: `limit` (max 100), `cursor`, `domainId`. Fails closed (401 `UNAUTHORIZED`) if `tenantId` is missing. |
 
 ### 10.5 Alerts (`/api/v1/alerts`)
 
-| Method | Path | Success | Description |
-|--------|------|---------|-------------|
-| GET | `/` | 200 | List change events. Query: `status` (`unresolved`/`resolved`/`all`), `severity`, `domainId`, `limit` (max 100), `cursor`. |
-| GET | `/:id` | 200 / 404 `ALERT_NOT_FOUND` | Single alert with domain detail. |
-| POST | `/:id/acknowledge` | 200 / 404 | Mark acknowledged; writes an `AuditLog`. |
-| POST | `/:id/resolve` | 200 / 404 | Mark acknowledged + `resolvedAt`; writes an `AuditLog`. |
-| GET | `/channels` | 200 / 404 `TENANT_NOT_FOUND` | Read notification channels (defaults if never set). |
-| PUT | `/channels` | 200 | Merge-update channels; writes an `AuditLog`. |
-| POST | `/channels/test` | 200 / 400 `TEST_FAILED` | Send a test notification. Body: `{ channel: email\|slack\|webhook, destination }`. |
+| Method | Path               | Success                      | Description                                                                                                               |
+| ------ | ------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/`                | 200                          | List change events. Query: `status` (`unresolved`/`resolved`/`all`), `severity`, `domainId`, `limit` (max 100), `cursor`. |
+| GET    | `/:id`             | 200 / 404 `ALERT_NOT_FOUND`  | Single alert with domain detail.                                                                                          |
+| POST   | `/:id/acknowledge` | 200 / 404                    | Mark acknowledged; writes an `AuditLog`.                                                                                  |
+| POST   | `/:id/resolve`     | 200 / 404                    | Mark acknowledged + `resolvedAt`; writes an `AuditLog`.                                                                   |
+| GET    | `/channels`        | 200 / 404 `TENANT_NOT_FOUND` | Read notification channels (defaults if never set).                                                                       |
+| PUT    | `/channels`        | 200                          | Merge-update channels; writes an `AuditLog`.                                                                              |
+| POST   | `/channels/test`   | 200 / 400 `TEST_FAILED`      | Send a test notification. Body: `{ channel: email\|slack\|webhook, destination }`.                                        |
 
 ### 10.6 Billing (`/api/v1/billing`)
 
-| Method | Path | Success | Description |
-|--------|------|---------|-------------|
-| GET | `/` | 200 | Current subscription + usage metrics. |
-| POST | `/checkout` | 200 / 400 `INVALID_PLAN` | Create a Lemon Squeezy checkout. Body: `{ plan: pro\|agency }`. Returns `{ checkoutUrl }`. |
-| POST | `/portal` | 200 / 400 `NO_SUBSCRIPTION` | Get customer portal URL. Returns `{ portalUrl }`. |
-| GET | `/usage` | 200 | Detailed usage metrics for the current month. |
+| Method | Path        | Success                     | Description                                                                                |
+| ------ | ----------- | --------------------------- | ------------------------------------------------------------------------------------------ |
+| GET    | `/`         | 200                         | Current subscription + usage metrics.                                                      |
+| POST   | `/checkout` | 200 / 400 `INVALID_PLAN`    | Create a Lemon Squeezy checkout. Body: `{ plan: pro\|agency }`. Returns `{ checkoutUrl }`. |
+| POST   | `/portal`   | 200 / 400 `NO_SUBSCRIPTION` | Get customer portal URL. Returns `{ portalUrl }`.                                          |
+| GET    | `/usage`    | 200                         | Detailed usage metrics for the current month.                                              |
 
 ### 10.7 Analytics (`/api/v1/analytics`)
 
-| Method | Path | Success | Description |
-|--------|------|---------|-------------|
-| GET | `/health-history` | 200 / 400 | Daily average health score. Query: `period ∈ {7,30,90}`. |
-| GET | `/overview` | 200 / 400 | KPIs with previous-period comparison. Query: `period ∈ {7,30,90}`. |
-| GET | `/compliance-summary` | 200 | Per-signal pass counts across the tenant's domains. |
+| Method | Path                  | Success   | Description                                                        |
+| ------ | --------------------- | --------- | ------------------------------------------------------------------ |
+| GET    | `/health-history`     | 200 / 400 | Daily average health score. Query: `period ∈ {7,30,90}`.           |
+| GET    | `/overview`           | 200 / 400 | KPIs with previous-period comparison. Query: `period ∈ {7,30,90}`. |
+| GET    | `/compliance-summary` | 200       | Per-signal pass counts across the tenant's domains.                |
 
 ### 10.8 Internal (root scope, `x-internal-key`)
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| POST | `/internal/unsubscribe` | `x-internal-key` == `INTERNAL_API_KEY` (timing-safe) | Record a suppression from the unsub worker. Body: `{ token, method, processedAt }`. Idempotent; returns 200 even for unknown tokens (does not reveal which tokens are valid). |
+| Method | Path                    | Auth                                                 | Description                                                                                                                                                                   |
+| ------ | ----------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/internal/unsubscribe` | `x-internal-key` == `INTERNAL_API_KEY` (timing-safe) | Record a suppression from the unsub worker. Body: `{ token, method, processedAt }`. Idempotent; returns 200 even for unknown tokens (does not reveal which tokens are valid). |
 
 ### 10.9 Webhooks (public, signature-verified)
 
-| Method | Path | Verification |
-|--------|------|--------------|
-| POST | `/webhooks/billing` | Lemon Squeezy `x-signature` HMAC-SHA256 of raw body (timing-safe); `x-event-name` header. Responds 200 immediately, then processes. |
-| POST | `/webhooks/clerk` | Clerk/Svix signature headers (`svix-id`, `svix-timestamp`, `svix-signature`). |
+| Method | Path                | Verification                                                                                                                        |
+| ------ | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/webhooks/billing` | Lemon Squeezy `x-signature` HMAC-SHA256 of raw body (timing-safe); `x-event-name` header. Responds 200 immediately, then processes. |
+| POST   | `/webhooks/clerk`   | Clerk/Svix signature headers (`svix-id`, `svix-timestamp`, `svix-signature`).                                                       |
 
 ## 11. Background Processing
 
@@ -418,10 +418,10 @@ All `/api/v1/*` endpoints require a valid Clerk Bearer JWT. All responses follow
 
 Defined in `src/queue.ts`:
 
-| Queue | Job payload | Retry policy | Retention |
-|-------|-------------|--------------|-----------|
-| `dns-poll` | `{ domainId, tenantId, triggeredBy }` | 3 attempts, exponential backoff 5s → 10s → 20s | keep last 100 completed / 500 failed |
-| `alert-dispatch` | `{ changeEventId, tenantId }` | 3 attempts, exponential backoff from 2s | keep last 50 completed / 200 failed |
+| Queue            | Job payload                           | Retry policy                                   | Retention                            |
+| ---------------- | ------------------------------------- | ---------------------------------------------- | ------------------------------------ |
+| `dns-poll`       | `{ domainId, tenantId, triggeredBy }` | 3 attempts, exponential backoff 5s → 10s → 20s | keep last 100 completed / 500 failed |
+| `alert-dispatch` | `{ changeEventId, tenantId }`         | 3 attempts, exponential backoff from 2s        | keep last 50 completed / 200 failed  |
 
 ### 11.2 Workers
 
@@ -522,10 +522,10 @@ Billing uses **Lemon Squeezy** (not Stripe) via its REST API and signed webhooks
 
 Two inbound webhook endpoints, both public (outside `/api/v1`) and both signature-verified against `request.rawBody`.
 
-| Endpoint | Provider | Signature | Headers |
-|----------|----------|-----------|---------|
-| `POST /webhooks/billing` | Lemon Squeezy | HMAC-SHA256 of raw body vs `LEMON_SQUEEZY_WEBHOOK_SECRET`, timing-safe | `x-signature`, `x-event-name` |
-| `POST /webhooks/clerk` | Clerk (Svix) | Svix signature verification with `CLERK_WEBHOOK_SECRET` | `svix-id`, `svix-timestamp`, `svix-signature` |
+| Endpoint                 | Provider      | Signature                                                              | Headers                                       |
+| ------------------------ | ------------- | ---------------------------------------------------------------------- | --------------------------------------------- |
+| `POST /webhooks/billing` | Lemon Squeezy | HMAC-SHA256 of raw body vs `LEMON_SQUEEZY_WEBHOOK_SECRET`, timing-safe | `x-signature`, `x-event-name`                 |
+| `POST /webhooks/clerk`   | Clerk (Svix)  | Svix signature verification with `CLERK_WEBHOOK_SECRET`                | `svix-id`, `svix-timestamp`, `svix-signature` |
 
 The Lemon Squeezy handler acknowledges (200) before processing. Both rely on the raw-body parser configured in `src/server.ts` — re-serializing the JSON would break signature verification.
 
@@ -537,20 +537,20 @@ The Lemon Squeezy handler acknowledges (200) before processing. Both rely on the
 
 Verified from the App Router tree and production build output:
 
-| Route | Access | Purpose |
-|-------|--------|---------|
-| `/` | Public | Landing page |
-| `/sign-in/[[...sign-in]]` | Public | Clerk sign-in (catch-all) |
-| `/sign-up/[[...sign-up]]` | Public | Clerk sign-up (catch-all) |
-| `/docs`, `/support`, `/privacy`, `/terms` | Public | Informational pages |
-| `/dashboard` | Protected | Dashboard home |
-| `/dashboard/domains` | Protected | Domain management |
-| `/dashboard/alerts` | Protected | Alerts feed |
-| `/dashboard/analytics` | Protected | Analytics/charts |
-| `/dashboard/compliance` | Protected | Compliance breakdown |
-| `/dashboard/billing` | Protected | Plan & billing |
-| `/dashboard/settings` | Protected | Notification channels |
-| `/dashboard/unsubscribe` | Protected | Unsubscribe / suppression |
+| Route                                     | Access    | Purpose                   |
+| ----------------------------------------- | --------- | ------------------------- |
+| `/`                                       | Public    | Landing page              |
+| `/sign-in/[[...sign-in]]`                 | Public    | Clerk sign-in (catch-all) |
+| `/sign-up/[[...sign-up]]`                 | Public    | Clerk sign-up (catch-all) |
+| `/docs`, `/support`, `/privacy`, `/terms` | Public    | Informational pages       |
+| `/dashboard`                              | Protected | Dashboard home            |
+| `/dashboard/domains`                      | Protected | Domain management         |
+| `/dashboard/alerts`                       | Protected | Alerts feed               |
+| `/dashboard/analytics`                    | Protected | Analytics/charts          |
+| `/dashboard/compliance`                   | Protected | Compliance breakdown      |
+| `/dashboard/billing`                      | Protected | Plan & billing            |
+| `/dashboard/settings`                     | Protected | Notification channels     |
+| `/dashboard/unsubscribe`                  | Protected | Unsubscribe / suppression |
 
 ### 17.2 Auth & layout
 
@@ -637,42 +637,42 @@ Values must never be committed. The following are the variable **names** used by
 
 ### 23.1 `apps/api` (`.env`)
 
-| Variable | Purpose |
-|----------|---------|
-| `DATABASE_URL` | PostgreSQL connection string (used by the Prisma driver adapter). |
-| `REDIS_URL` | Redis connection (BullMQ + rate limit). An Upstash `rediss://` URL enables TLS automatically. |
-| `PORT` | HTTP port (default `4500`). |
-| `NODE_ENV` | Environment; toggles CORS, rate-limit store, logging, and query logging. |
-| `FRONTEND_URL` | Allowed CORS origin in production. |
-| `RUN_WORKERS_INLINE` | If `"true"`, run workers + scheduler inside the HTTP process (default off). |
-| `CLERK_PUBLISHABLE_KEY` | Clerk publishable key. |
-| `CLERK_SECRET_KEY` | Clerk secret key. |
-| `CLERK_WEBHOOK_SECRET` | Verifies Clerk (Svix) webhooks. |
-| `CLERK_JWKS_URL` | Clerk JWKS endpoint for JWT verification. |
-| `CLERK_DOMAIN` | Clerk domain (issuer/JWKS derivation). |
-| `GEMINI_API_KEY` | Google Gemini API key. |
-| `RESEND_API_KEY` | Resend API key (alert/report email). |
-| `RESEND_FROM_EMAIL` | From-address for outbound email. |
-| `LEMON_SQUEEZY_API_KEY` | Lemon Squeezy REST API key. |
-| `LEMON_SQUEEZY_STORE_ID` | Lemon Squeezy store ID. |
-| `LEMON_SQUEEZY_WEBHOOK_SECRET` | Verifies Lemon Squeezy webhooks. |
-| `LS_PRO_VARIANT_ID` | Checkout variant for the pro plan. |
-| `LS_AGENCY_VARIANT_ID` | Checkout variant for the agency plan. |
-| `UNSUB_HMAC_SECRET` | HMAC key for unsubscribe tokens (≥32 chars; must match the worker). |
-| `UNSUB_WORKER_URL` | Base URL of the unsub worker (default `https://unsub.inboxrules.io`). |
-| `INTERNAL_API_KEY` | Shared secret for `/internal/*` (must match the worker). |
+| Variable                       | Purpose                                                                                       |
+| ------------------------------ | --------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                 | PostgreSQL connection string (used by the Prisma driver adapter).                             |
+| `REDIS_URL`                    | Redis connection (BullMQ + rate limit). An Upstash `rediss://` URL enables TLS automatically. |
+| `PORT`                         | HTTP port (default `4500`).                                                                   |
+| `NODE_ENV`                     | Environment; toggles CORS, rate-limit store, logging, and query logging.                      |
+| `FRONTEND_URL`                 | Allowed CORS origin in production.                                                            |
+| `RUN_WORKERS_INLINE`           | If `"true"`, run workers + scheduler inside the HTTP process (default off).                   |
+| `CLERK_PUBLISHABLE_KEY`        | Clerk publishable key.                                                                        |
+| `CLERK_SECRET_KEY`             | Clerk secret key.                                                                             |
+| `CLERK_WEBHOOK_SECRET`         | Verifies Clerk (Svix) webhooks.                                                               |
+| `CLERK_JWKS_URL`               | Clerk JWKS endpoint for JWT verification.                                                     |
+| `CLERK_DOMAIN`                 | Clerk domain (issuer/JWKS derivation).                                                        |
+| `GEMINI_API_KEY`               | Google Gemini API key.                                                                        |
+| `RESEND_API_KEY`               | Resend API key (alert/report email).                                                          |
+| `RESEND_FROM_EMAIL`            | From-address for outbound email.                                                              |
+| `LEMON_SQUEEZY_API_KEY`        | Lemon Squeezy REST API key.                                                                   |
+| `LEMON_SQUEEZY_STORE_ID`       | Lemon Squeezy store ID.                                                                       |
+| `LEMON_SQUEEZY_WEBHOOK_SECRET` | Verifies Lemon Squeezy webhooks.                                                              |
+| `LS_PRO_VARIANT_ID`            | Checkout variant for the pro plan.                                                            |
+| `LS_AGENCY_VARIANT_ID`         | Checkout variant for the agency plan.                                                         |
+| `UNSUB_HMAC_SECRET`            | HMAC key for unsubscribe tokens (≥32 chars; must match the worker).                           |
+| `UNSUB_WORKER_URL`             | Base URL of the unsub worker (default `https://unsub.inboxrules.io`).                         |
+| `INTERNAL_API_KEY`             | Shared secret for `/internal/*` (must match the worker).                                      |
 
 ### 23.2 `apps/web` (`.env.local`)
 
-| Variable | Purpose |
-|----------|---------|
-| `NEXT_PUBLIC_API_URL` | Base URL of the API (default `http://localhost:4500`). |
-| `CLERK_SECRET_KEY` | Clerk secret key (server side). |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk publishable key (client side). |
-| `NEXT_PUBLIC_CLERK_SIGN_IN_URL` | Sign-in route. |
-| `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | Sign-up route. |
-| `NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL` | Post-sign-in redirect. |
-| `NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL` | Post-sign-up redirect. |
+| Variable                              | Purpose                                                |
+| ------------------------------------- | ------------------------------------------------------ |
+| `NEXT_PUBLIC_API_URL`                 | Base URL of the API (default `http://localhost:4500`). |
+| `CLERK_SECRET_KEY`                    | Clerk secret key (server side).                        |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`   | Clerk publishable key (client side).                   |
+| `NEXT_PUBLIC_CLERK_SIGN_IN_URL`       | Sign-in route.                                         |
+| `NEXT_PUBLIC_CLERK_SIGN_UP_URL`       | Sign-up route.                                         |
+| `NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL` | Post-sign-in redirect.                                 |
+| `NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL` | Post-sign-up redirect.                                 |
 
 ### 23.3 `apps/unsub` (Wrangler)
 
@@ -684,11 +684,11 @@ Values must never be committed. The following are the variable **names** used by
 
 ### Deployment topology
 
-| App | Target | Command / notes |
-|-----|--------|-----------------|
-| `apps/web` | Vercel | Next.js 16 App Router (Turbopack). Framework defaults; no `vercel.json`/`vercel.ts` in the repo. |
-| `apps/api` | Railway | Compile with `tsc` (no `build` script; `tsconfig` `outDir: ./dist`), run `pnpm start` (`node dist/server.js`). Workers as a separate service via `pnpm workers`. |
-| `apps/unsub` | Cloudflare Workers | `pnpm deploy` (`wrangler deploy`); secrets via `wrangler secret put`. |
+| App          | Target             | Command / notes                                                                                                                                                  |
+| ------------ | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web`   | Vercel             | Next.js 16 App Router (Turbopack). Framework defaults; no `vercel.json`/`vercel.ts` in the repo.                                                                 |
+| `apps/api`   | Railway            | Compile with `tsc` (no `build` script; `tsconfig` `outDir: ./dist`), run `pnpm start` (`node dist/server.js`). Workers as a separate service via `pnpm workers`. |
+| `apps/unsub` | Cloudflare Workers | `pnpm deploy` (`wrangler deploy`); secrets via `wrangler secret put`.                                                                                            |
 
 ### Per-app commands
 
@@ -740,19 +740,19 @@ docker compose up -d
 
 ## 25. Troubleshooting
 
-| Symptom | Likely cause | Resolution |
-|---------|--------------|------------|
-| Background jobs never run (no scans/alerts) | Workers aren't running — `pnpm dev` starts HTTP only by default | Run `pnpm workers`, or set `RUN_WORKERS_INLINE=true`. |
-| `DATABASE_URL is not defined` at startup | `.env` missing/not loaded | Ensure `apps/api/.env` exists; `db:*` scripts load it via `dotenv -e .env`. |
-| Prisma client/type errors after schema edits | Client not regenerated | Run `pnpm db:generate`. |
-| `db:*` commands can't see env vars | Prisma 7 does not auto-load `.env` | Commands already wrap `dotenv`; run them via the `pnpm db:*` scripts. |
-| "temporarily rate-limited" / intermittent 503 on scan | Redis (e.g. Upstash free tier) command budget exhausted by API + workers + scheduler sharing one instance | Avoid `RUN_WORKERS_INLINE`; run workers separately. Scan endpoint returns 503 `QUEUE_UNAVAILABLE` with `Retry-After: 30`. |
-| Burst of 401s right after API startup | First request racing the cold JWKS fetch | `warmJwks()` pre-warms it; retry after startup. |
-| Lemon Squeezy / Clerk webhook rejected as invalid signature | Body re-serialized before verification, or wrong secret | Verification uses `request.rawBody`; confirm the matching webhook secret is set. |
-| One-click unsubscribe fails | `UNSUB_HMAC_SECRET` or `INTERNAL_API_KEY` mismatch between API and worker, or bad token format | Ensure both secrets match; worker expects a 64-char hex token and a `List-Unsubscribe=One-Click` body. |
-| Local Redis won't start / port conflict | Port 6380 already in use | Free the port or adjust the mapping in `docker-compose.yml`. |
-| AI requests return 429 | Monthly per-tenant AI budget reached | Budgets: free `$0.50` / pro `$10` / agency `$50`. Upgrade plan or wait for the next calendar month. |
-| Local Redis "port 6379" assumption fails | The compose file maps host **6380** | Point `REDIS_URL` at `localhost:6380`. |
+| Symptom                                                     | Likely cause                                                                                              | Resolution                                                                                                                |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Background jobs never run (no scans/alerts)                 | Workers aren't running — `pnpm dev` starts HTTP only by default                                           | Run `pnpm workers`, or set `RUN_WORKERS_INLINE=true`.                                                                     |
+| `DATABASE_URL is not defined` at startup                    | `.env` missing/not loaded                                                                                 | Ensure `apps/api/.env` exists; `db:*` scripts load it via `dotenv -e .env`.                                               |
+| Prisma client/type errors after schema edits                | Client not regenerated                                                                                    | Run `pnpm db:generate`.                                                                                                   |
+| `db:*` commands can't see env vars                          | Prisma 7 does not auto-load `.env`                                                                        | Commands already wrap `dotenv`; run them via the `pnpm db:*` scripts.                                                     |
+| "temporarily rate-limited" / intermittent 503 on scan       | Redis (e.g. Upstash free tier) command budget exhausted by API + workers + scheduler sharing one instance | Avoid `RUN_WORKERS_INLINE`; run workers separately. Scan endpoint returns 503 `QUEUE_UNAVAILABLE` with `Retry-After: 30`. |
+| Burst of 401s right after API startup                       | First request racing the cold JWKS fetch                                                                  | `warmJwks()` pre-warms it; retry after startup.                                                                           |
+| Lemon Squeezy / Clerk webhook rejected as invalid signature | Body re-serialized before verification, or wrong secret                                                   | Verification uses `request.rawBody`; confirm the matching webhook secret is set.                                          |
+| One-click unsubscribe fails                                 | `UNSUB_HMAC_SECRET` or `INTERNAL_API_KEY` mismatch between API and worker, or bad token format            | Ensure both secrets match; worker expects a 64-char hex token and a `List-Unsubscribe=One-Click` body.                    |
+| Local Redis won't start / port conflict                     | Port 6380 already in use                                                                                  | Free the port or adjust the mapping in `docker-compose.yml`.                                                              |
+| AI requests return 429                                      | Monthly per-tenant AI budget reached                                                                      | Budgets: free `$0.50` / pro `$10` / agency `$50`. Upgrade plan or wait for the next calendar month.                       |
+| Local Redis "port 6379" assumption fails                    | The compose file maps host **6380**                                                                       | Point `REDIS_URL` at `localhost:6380`.                                                                                    |
 
 ## 26. Known Limitations & Tech Debt
 
@@ -766,8 +766,6 @@ Observed directly in the repository:
 - **AI quota fails open on DB errors.** If the usage query fails, the quota check allows the request through — resilient, but it can under-count in a database outage.
 - **Placeholder informational pages.** `/terms` (and similar footer pages) render a `PlaceholderPage` ("being finalized"), not final legal copy.
 - **Single shared Redis pressure.** Running API + workers + scheduler against one rate-limited Redis can exhaust its command budget; the design mitigates this by making inline workers opt-in, but the constraint remains operational.
-
-> Note: `CLAUDE.md` mentions two "known rough edges" — unauthenticated `POST /test/ai/*` routes with a hardcoded tenant, and `console.log` of the Clerk key in `auth.ts`. These were **not** found in the current source (`server.ts` registers no `/test/ai/*` routes). This documentation reflects the code as inspected.
 
 ## 27. Future Improvements
 
@@ -785,9 +783,3 @@ Candidate improvements implied by the current design and its `TODO`/comment note
 ---
 
 ## Appendix: Verification Notes
-
-This documentation was generated by inspecting the repository source. Items that could not be verified from the codebase are marked inline as "not documented in the repository." No secret values were read into or reproduced in this document — only variable **names** are listed. Where `CLAUDE.md` disagreed with the current source (e.g. the `/test/ai/*` routes), the source code was treated as authoritative.
-
-
-
-
