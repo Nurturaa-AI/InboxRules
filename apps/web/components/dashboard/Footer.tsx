@@ -1,9 +1,10 @@
 import Link from "next/link"
 
 // Footer navigation. Every href points to a real, existing route
-// (see app/docs, app/support, app/privacy, app/terms).
+// (see app/(legal)/documentation, app/support, app/(legal)/privacy,
+// app/(legal)/terms).
 const FOOTER_LINKS = [
-  { label: "Documentation", href: "/docs" },
+  { label: "Documentation", href: "/documentation" },
   { label: "Support", href: "/support" },
   { label: "Privacy", href: "/privacy" },
   { label: "Terms", href: "/terms" },

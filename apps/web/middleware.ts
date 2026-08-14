@@ -11,6 +11,7 @@ const isPublicRoute = createRouteMatcher([
   "/",
   // Informational pages linked from the footer
   "/docs",
+  "/documentation",
   "/support",
   "/privacy",
   "/terms",

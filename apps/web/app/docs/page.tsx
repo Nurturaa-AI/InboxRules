@@ -1,18 +1,7 @@
-import type { Metadata } from "next"
+import { permanentRedirect } from "next/navigation"
 
-import PlaceholderPage from "@/components/shared/PlaceholderPage"
-
-export const metadata: Metadata = {
-  title: "Documentation — InboxRules",
-  description:
-    "Guides and API references for monitoring email deliverability with InboxRules.",
-}
-
+// The documentation now lives at /documentation. Keep /docs working for any
+// existing links or bookmarks by permanently (308) redirecting to it.
 export default function DocsPage() {
-  return (
-    <PlaceholderPage
-      title="Documentation"
-      description="Guides and API references for getting the most out of InboxRules are on the way."
-    />
-  )
+  permanentRedirect("/documentation")
 }
