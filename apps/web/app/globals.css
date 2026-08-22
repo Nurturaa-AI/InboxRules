@@ -68,7 +68,7 @@
   --color-card-neutral: var(--card-neutral);
   --color-card-neutral-border: var(--card-neutral-border);
 
-  /* Semantic status colors (solid / on-color / tinted surface) */
+  
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
   --color-success-subtle: var(--success-subtle);
