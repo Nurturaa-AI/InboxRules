@@ -24,9 +24,32 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "InboxRules — Email Compliance Dashboard",
+  // Base URL used to resolve relative OpenGraph / canonical URLs on child pages.
+  // inboxrules.io is the product domain used across the API (FRONTEND_URL,
+  // email from-addresses, and the unsub worker subdomain).
+  metadataBase: new URL("https://inboxrules.io"),
+  title: {
+    default: "InboxRules — Email Compliance Dashboard",
+    // Child pages set a plain `title`; it is composed into this template.
+    template: "%s — InboxRules",
+  },
   description:
     "Monitor SPF, DKIM, DMARC and deliverability for your sending domains.",
+  openGraph: {
+    type: "website",
+    siteName: "InboxRules",
+    title: "InboxRules — Email Compliance Dashboard",
+    description:
+      "Monitor SPF, DKIM, DMARC and deliverability for your sending domains.",
+    url: "/",
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "InboxRules — Email Compliance Dashboard",
+    description:
+      "Monitor SPF, DKIM, DMARC and deliverability for your sending domains.",
+  },
 };
 
 export default function RootLayout({

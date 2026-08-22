@@ -1,7 +1,7 @@
 {
   "name": "inboxrules",
   "version": "1.0.0",
-  "description": "",
+  "description": "Email deliverability monitoring SaaS. InboxRules checks a customer's sending domains for SPF/DKIM/DMARC and RFC 8058 one-click-unsubscribe compliance, uses AI (Google Gemini) to explain problems and generate configuration fixes in plain English, and hosts an RFC 8058 one-click unsubscribe endpoint at the edge.",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"

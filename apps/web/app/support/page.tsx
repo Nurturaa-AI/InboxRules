@@ -3,7 +3,7 @@ import type { Metadata } from "next"
 import PlaceholderPage from "@/components/shared/PlaceholderPage"
 
 export const metadata: Metadata = {
-  title: "Support — InboxRules",
+  title: "Support",
   description: "Get help with your InboxRules account and email deliverability.",
 }
 
