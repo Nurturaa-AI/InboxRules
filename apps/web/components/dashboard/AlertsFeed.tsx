@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { toast } from "sonner"
 import Link from "next/link"
 import { useAuth } from "@clerk/nextjs"
 import { CheckCircle2, RefreshCw } from "lucide-react"
@@ -35,7 +36,7 @@ export default function AlertsFeed() {
 
   // Shared, refresh-aware query — participates in refreshAllQueries() so a
   // mutation anywhere on the dashboard re-runs this fetch automatically.
-  const { data, loading } = useApiQuery<AlertEvent[]>(
+  const { data, loading, error, refetch } = useApiQuery<AlertEvent[]>(
     "/alerts?status=unresolved&limit=4"
   )
   const alerts = data ?? []
@@ -48,11 +49,12 @@ export default function AlertsFeed() {
     setAcknowledging(id)
     try {
       const token = await getToken()
-      if (!token) return
+      if (!token) throw new Error("Not authenticated")
       await apiRequest(`/alerts/${id}/acknowledge`, "POST", token)
+      toast.success("Alert acknowledged")
       refreshAllQueries()
-    } catch {
-      // fail silently
+    } catch (err) {
+      toast.error("Could not acknowledge alert", { description: err instanceof Error ? err.message : undefined })
     } finally {
       setAcknowledging(null)
     }
@@ -66,17 +68,17 @@ export default function AlertsFeed() {
       <div className="flex items-center justify-between border-b border-border px-5 py-4">
         <div>
           <h2 className="text-sm font-semibold tracking-tight text-foreground">
-            Recent Alerts
+            Requires review
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
             {loading
               ? "Loading…"
-              : `${unresolvedCount} unresolved issue${unresolvedCount !== 1 ? "s" : ""}`}
+              : `Latest ${unresolvedCount} unacknowledged alert${unresolvedCount !== 1 ? "s" : ""} · review the finding before taking action`}
           </p>
         </div>
         <Link
           href="/dashboard/alerts"
-          className="text-xs font-medium text-primary hover:underline"
+          className="shrink-0 whitespace-nowrap text-xs font-medium text-primary hover:underline"
         >
           View all
         </Link>
@@ -89,29 +91,30 @@ export default function AlertsFeed() {
         </div>
       )}
 
+      {error && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 p-5 text-sm"><p>Could not load alerts. {error}</p><Button variant="outline" size="sm" onClick={refetch}>Try again</Button></div>}
       {/* Empty */}
-      {!loading && alerts.length === 0 && (
+      {!loading && !error && alerts.length === 0 && (
         <div className="flex flex-col items-center gap-2 px-5 py-8 text-center">
           <CheckCircle2 className="size-7 text-success" />
           <p className="text-sm font-semibold text-foreground">
-            No unresolved alerts
+            No alerts awaiting review
           </p>
           <p className="text-xs text-muted-foreground">
-            All your domains are looking good
+            Acknowledged alerts remain available in Alerts until marked resolved.
           </p>
         </div>
       )}
 
       {/* Alert items */}
-      {!loading &&
+      {!loading && !error &&
         alerts.map((alert) => {
           const title =
-            alert.aiTitle || CHANGE_LABELS[alert.changeType] || alert.changeType
+            CHANGE_LABELS[alert.changeType] || alert.changeType
 
           return (
             <div
               key={alert.id}
-              className="flex items-center gap-3 border-b border-border px-5 py-3 last:border-b-0"
+              className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3 border-b border-border px-5 py-4 last:border-b-0 sm:flex sm:items-center"
             >
               <StatusBadge
                 status={statusFromString(alert.severity)}
@@ -122,10 +125,10 @@ export default function AlertsFeed() {
 
               {/* Content */}
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-foreground">
-                  {title}
+                <p className="text-sm font-medium text-foreground">
+                  <Link href="/dashboard/alerts" className="hover:text-primary hover:underline">{title}</Link>
                 </p>
-                <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+                <p className="mt-0.5 break-all font-mono text-xs text-muted-foreground">
                   {alert.domain?.domain} · {timeAgo(alert.detectedAt)}
                 </p>
               </div>
@@ -137,9 +140,9 @@ export default function AlertsFeed() {
                 onClick={() => acknowledgeAlert(alert.id)}
                 disabled={acknowledging === alert.id}
                 aria-label={`Acknowledge alert: ${title}`}
-                className="shrink-0"
+                className="col-start-2 w-fit shrink-0"
               >
-                Ack
+                Acknowledge
               </Button>
             </div>
           )

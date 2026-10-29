@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils"
 // soft-slate neutral default. In dark mode every token maps back to the plain
 // card surface/border, so dark is visually unchanged.
 const cardVariants = cva(
-  "group/card flex flex-col gap-6 overflow-hidden rounded-xl border py-6 text-sm text-card-foreground shadow-sm has-[>img:first-child]:pt-0 data-[size=sm]:gap-4 data-[size=sm]:py-4 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
+  "group/card flex flex-col gap-6 overflow-hidden rounded-xl border py-6 text-sm text-card-foreground has-[>img:first-child]:pt-0 data-[size=sm]:gap-4 data-[size=sm]:py-4 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
   {
     variants: {
       variant: {

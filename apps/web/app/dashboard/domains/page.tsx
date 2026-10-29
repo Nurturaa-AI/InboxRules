@@ -1,6 +1,8 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
+import { useDomainScan } from "@/lib/useDomainScan"
 import { useAuth } from "@clerk/nextjs"
 import { toast } from "sonner"
 import {
@@ -57,7 +59,7 @@ export default function DomainsPage() {
     useApiQuery<Domain[]>("/domains?limit=100")
 
   const [search, setSearch] = useState("")
-  const [scanning, setScanning] = useState<string | null>(null)
+  const { scan, scanning } = useDomainScan()
   const [deleting, setDeleting] = useState<string | null>(null)
   const [showWizard, setShowWizard] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<Domain | null>(null)
@@ -70,33 +72,11 @@ export default function DomainsPage() {
   )
 
   // Canonical thresholds (shared with HealthScore): ≥80 healthy, ≥60 warning, <60 critical.
-  const healthy = domains.filter((d) => d.healthScore >= 80).length
+  const healthy = domains.filter((d) => d.lastCheckedAt && d.healthScore >= 80).length
   const warning = domains.filter(
-    (d) => d.healthScore >= 60 && d.healthScore < 80
+    (d) => d.lastCheckedAt && d.healthScore >= 60 && d.healthScore < 80
   ).length
-  const critical = domains.filter((d) => d.healthScore < 60).length
-
-  async function handleScan(id: string, name: string) {
-    setScanning(id)
-    try {
-      const token = await getToken()
-      if (!token) throw new Error("No auth token found")
-      await apiRequest(`/domains/${id}/scan`, "POST", token)
-      toast.success(`Scanning ${name}…`, {
-        description: "Results refresh in a few seconds.",
-      })
-      // Refresh after 3s to show the updated score.
-      setTimeout(() => {
-        refetch()
-        setScanning(null)
-      }, 3000)
-    } catch (err) {
-      toast.error("Failed to start scan", {
-        description: err instanceof Error ? err.message : undefined,
-      })
-      setScanning(null)
-    }
-  }
+  const critical = domains.filter((d) => d.lastCheckedAt && d.healthScore < 60).length
 
   async function handleDelete(domain: Domain) {
     setDeleting(domain.id)
@@ -124,10 +104,10 @@ export default function DomainsPage() {
           <DomainAvatar domain={d.domain} />
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-foreground">
-              {d.domain}
+              <Link href={`/dashboard/compliance?domain=${d.id}`} className="hover:text-primary hover:underline">{d.domain}</Link>
             </p>
             <p className="truncate font-mono text-xs text-muted-foreground">
-              {d.detectedEsp || "Detecting ESP…"}
+              {d.detectedEsp || "ESP not identified"}
             </p>
           </div>
         </div>
@@ -137,7 +117,7 @@ export default function DomainsPage() {
       key: "health",
       header: "Health",
       className: "w-40",
-      cell: (d) => <HealthScore score={d.healthScore} size="sm" />,
+      cell: (d) => <HealthScore score={d.lastCheckedAt ? d.healthScore : null} size="sm" />,
     },
     { key: "spf", header: "SPF", cell: (d) => <AuthStatusBadge status={d.spfStatus} /> },
     { key: "dkim", header: "DKIM", cell: (d) => <AuthStatusBadge status={d.dkimStatus} /> },
@@ -169,18 +149,18 @@ export default function DomainsPage() {
           <Button
             variant="secondary"
             size="xs"
-            onClick={() => handleScan(d.id, d.domain)}
-            disabled={scanning === d.id}
+            onClick={() => scan(d)}
+            disabled={scanning.includes(d.id)}
           >
-            <RefreshCw className={scanning === d.id ? "animate-spin" : ""} />
-            {scanning === d.id ? "Scanning" : "Scan"}
+            <RefreshCw className={scanning.includes(d.id) ? "animate-spin" : ""} />
+            {scanning.includes(d.id) ? "Awaiting scan" : "Scan"}
           </Button>
           <ActionMenu
             items={[
               {
                 label: "Open site",
                 icon: ExternalLink,
-                onClick: () => window.open(`https://${d.domain}`, "_blank"),
+                onClick: () => window.open(`https://${d.domain}`, "_blank", "noopener,noreferrer"),
               },
               {
                 label: "Remove domain",
@@ -211,9 +191,9 @@ export default function DomainsPage() {
       <PageHeader
         title="Domains"
         description={
-          loading
+          error ? "Domain data is unavailable. Retry below." : loading
             ? "Loading…"
-            : `${domains.length} domain${domains.length !== 1 ? "s" : ""} being monitored`
+            : `${domains.length} loaded domain${domains.length !== 1 ? "s" : ""} · open a domain to inspect DNS evidence`
         }
         action={
           <Button onClick={() => setShowWizard(true)}>
@@ -228,21 +208,21 @@ export default function DomainsPage() {
         <MetricCard
           variant="success"
           label="Healthy"
-          value={loading ? "—" : healthy}
+          value={loading || error ? "—" : healthy}
           icon={ShieldCheck}
           hint="Score ≥ 80"
         />
         <MetricCard
           variant="warning"
           label="Warning"
-          value={loading ? "—" : warning}
+          value={loading || error ? "—" : warning}
           icon={AlertTriangle}
           hint="Score 60–79"
         />
         <MetricCard
           variant="danger"
           label="Critical"
-          value={loading ? "—" : critical}
+          value={loading || error ? "—" : critical}
           icon={XCircle}
           hint="Score < 60"
         />

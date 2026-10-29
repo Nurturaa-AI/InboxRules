@@ -3,9 +3,6 @@
 import { useState } from "react"
 import { toast } from "sonner"
 import {
-  Copy,
-  Check,
-  Shield,
   Zap,
   Globe,
   RefreshCw,
@@ -13,6 +10,10 @@ import {
   Mail,
 } from "lucide-react"
 
+import Link from "next/link"
+import { useApi } from "@/lib/api"
+import { Input } from "@/components/ui/input"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { useApiQuery } from "@/lib/useApiQuery"
 import { timeAgo } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -40,67 +41,48 @@ interface SuppressionEvent {
   domain: { domain: string }
 }
 
-const UNSUB_URL =
-  process.env.NEXT_PUBLIC_UNSUB_URL || "https://unsub.inboxrules.io"
-
-const FEATURES = [
-  {
-    icon: Shield,
-    title: "RFC 8058 Compliant",
-    desc: "One-click POST handler meeting Gmail and Yahoo requirements",
-  },
-  {
-    icon: Zap,
-    title: "Global Edge Delivery",
-    desc: "Hosted on Cloudflare Workers — zero cold starts worldwide",
-  },
-  {
-    icon: Globe,
-    title: "Auto Suppression",
-    desc: "Unsubscribes are recorded and suppressed automatically",
-  },
-]
-
 export default function UnsubscribePage() {
-  const { data: domainsData, loading: domainsLoading } =
+  const api = useApi()
+  const { data: domainsData, loading: domainsLoading, error: domainsError, refetch: refreshDomains } =
     useApiQuery<Domain[]>("/domains?limit=100")
 
   const {
     data: suppressionData,
     loading: suppressionLoading,
+    error: suppressionError,
+    pagination,
     refetch,
-  } = useApiQuery<{ items: SuppressionEvent[]; pagination: { total: number } }>(
+  } = useApiQuery<SuppressionEvent[]>(
     "/suppression?limit=20"
   )
 
-  const [copied, setCopied] = useState<string | null>(null)
-
-  const domains = domainsData || []
-  const events =
-    suppressionData?.items ||
-    (Array.isArray(suppressionData)
-      ? (suppressionData as SuppressionEvent[])
-      : [])
-  const totalUnsubs = suppressionData?.pagination?.total || 0
+  const [selectedDomain, setSelectedDomain] = useState<Domain | null>(null)
+  const [recipient, setRecipient] = useState("")
+  const [generating, setGenerating] = useState(false)
+  const [headers, setHeaders] = useState<string | null>(null)
+  const [headerError, setHeaderError] = useState<string | null>(null)
+  const domains = domainsData ?? []
+  const events = suppressionData ?? []
   const active = domains.filter((d) => d.unsubStatus === "active").length
 
-  function copyEndpoint(domainId: string) {
-    const url = `${UNSUB_URL}/unsubscribe/${domainId}`
-    navigator.clipboard.writeText(url)
-    setCopied(domainId)
-    toast.success("Endpoint URL copied to clipboard")
-    setTimeout(() => setCopied(null), 2000)
+  async function generateHeaders(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!selectedDomain) return
+    setGenerating(true)
+    setHeaderError(null)
+    setHeaders(null)
+    try {
+      const response = await api.get<{ data: { listUnsubscribe: string; listUnsubscribePost: string } }>(`/domains/${selectedDomain.id}/unsubscribe/headers?recipient=${encodeURIComponent(recipient.trim())}`)
+      setHeaders(`List-Unsubscribe: ${response.data.listUnsubscribe}\nList-Unsubscribe-Post: ${response.data.listUnsubscribePost}`)
+    } catch (err) {
+      setHeaderError(err instanceof Error ? err.message : "Could not generate headers")
+    } finally { setGenerating(false) }
   }
 
-  function copyHeaders(domain: Domain) {
-    const text =
-      `List-Unsubscribe: <${UNSUB_URL}/unsubscribe/${domain.id}>, ` +
-      `<mailto:unsubscribe@${domain.domain}?subject=unsubscribe>\n` +
-      `List-Unsubscribe-Post: List-Unsubscribe=One-Click`
-    navigator.clipboard.writeText(text)
-    setCopied(`headers-${domain.id}`)
-    toast.success("Email headers copied to clipboard")
-    setTimeout(() => setCopied(null), 2000)
+  async function copyHeaders() {
+    if (!headers) return
+    try { await navigator.clipboard.writeText(headers); toast.success("Recipient headers copied") }
+    catch { toast.error("Could not copy headers. Select and copy the text below.") }
   }
 
   const eventColumns: DataTableColumn<SuppressionEvent>[] = [
@@ -150,43 +132,26 @@ export default function UnsubscribePage() {
         description="RFC 8058 one-click unsubscribe endpoints and suppression list"
       />
 
-      {/* Feature cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {FEATURES.map((item) => {
-          const Icon = item.icon
-          return (
-            <Card key={item.title} className="flex-row gap-3.5 p-5">
-              <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary [&_svg]:size-[18px]">
-                <Icon aria-hidden="true" />
-              </span>
-              <div>
-                <p className="text-sm font-semibold text-foreground">
-                  {item.title}
-                </p>
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  {item.desc}
-                </p>
-              </div>
-            </Card>
-          )
-        })}
+      <div className="border-l-2 border-primary py-1 pl-4 text-sm leading-relaxed text-muted-foreground">
+        Enable one-click unsubscribe in <Link href="/dashboard/compliance" className="font-medium text-primary underline">Compliance</Link>, then generate signed headers for each recipient.
+        Each URL identifies one recipient; generate separate headers for every message.
       </div>
 
       {/* Stats */}
       <div className="grid gap-4 sm:grid-cols-3">
         <MetricCard
           label="Active Endpoints"
-          value={domainsLoading ? "—" : active}
+          value={domainsLoading || domainsError ? "—" : active}
           icon={Zap}
         />
         <MetricCard
           label="Unsubscribes (all)"
-          value={suppressionLoading ? "—" : totalUnsubs}
+          value={suppressionLoading || suppressionError ? "—" : pagination?.total ?? "—"}
           icon={Mail}
         />
         <MetricCard
           label="Total Domains"
-          value={domainsLoading ? "—" : domains.length}
+          value={domainsLoading || domainsError ? "—" : domains.length}
           icon={Globe}
         />
       </div>
@@ -196,7 +161,7 @@ export default function UnsubscribePage() {
         <CardHeader className="border-b p-5">
           <CardTitle className="text-sm">Unsubscribe Endpoints</CardTitle>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Add these URLs and headers to your email campaigns
+            Generate recipient-specific headers for enabled domains
           </p>
         </CardHeader>
 
@@ -204,7 +169,7 @@ export default function UnsubscribePage() {
           <div className="p-5">
             <LoadingSkeleton variant="text" count={3} />
           </div>
-        ) : domains.length === 0 ? (
+        ) : domainsError ? (<EmptyState title="Could not load endpoints" description={domainsError} action={<Button variant="outline" onClick={refreshDomains}>Try again</Button>} />) : domains.length === 0 ? (
           <EmptyState
             icon={Link2}
             size="sm"
@@ -224,38 +189,13 @@ export default function UnsubscribePage() {
                   </p>
                   <StatusBadge
                     status={statusFromString(d.unsubStatus)}
-                    label={d.unsubStatus === "active" ? "Active" : "Inactive"}
+                    label={d.unsubStatus === "active" ? "Active" : d.unsubStatus === "unknown" ? "Not configured" : "Inactive"}
                   />
                 </div>
 
-                <div className="flex min-w-0 flex-1 items-center gap-2">
-                  <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-muted px-2.5 py-1.5 font-mono text-xs text-muted-foreground">
-                    {UNSUB_URL}/unsubscribe/{d.id}
-                  </code>
-                  <Button
-                    variant="outline"
-                    size="icon-sm"
-                    onClick={() => copyEndpoint(d.id)}
-                    aria-label={`Copy unsubscribe endpoint for ${d.domain}`}
-                  >
-                    {copied === d.id ? (
-                      <Check className="text-success" />
-                    ) : (
-                      <Copy />
-                    )}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => copyHeaders(d)}
-                  >
-                    {copied === `headers-${d.id}` ? (
-                      <Check className="text-success" />
-                    ) : (
-                      <Copy />
-                    )}
-                    Headers
-                  </Button>
+                <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-3">
+                  <p className="text-xs text-muted-foreground">{d.unsubStatus === "active" ? "Signed, per-recipient URL" : "Enable in Compliance before generating headers"}</p>
+                  <Button variant="outline" size="sm" disabled={d.unsubStatus !== "active"} onClick={() => { setSelectedDomain(d); setRecipient(""); setHeaders(null); setHeaderError(null) }}>Generate headers</Button>
                 </div>
               </li>
             ))}
@@ -291,7 +231,7 @@ export default function UnsubscribePage() {
         <div className="p-5">
           {suppressionLoading ? (
             <LoadingSkeleton variant="table" count={4} />
-          ) : (
+          ) : suppressionError ? (<EmptyState title="Could not load unsubscribe events" description={suppressionError} action={<Button variant="outline" onClick={refetch}>Try again</Button>} />) : (
             <DataTable
               columns={eventColumns}
               data={events}
@@ -308,6 +248,18 @@ export default function UnsubscribePage() {
           )}
         </div>
       </Card>
+      <Dialog open={selectedDomain !== null} onOpenChange={(open) => { if (!open && !generating) setSelectedDomain(null) }}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Generate unsubscribe headers</DialogTitle><DialogDescription>Generate signed headers for one recipient on {selectedDomain?.domain}. Use a new token for each recipient.</DialogDescription></DialogHeader>
+          <form onSubmit={generateHeaders} className="space-y-3">
+            <label htmlFor="header-recipient" className="text-sm font-medium">Recipient email</label>
+            <Input id="header-recipient" type="email" required value={recipient} disabled={generating} onChange={(event) => { setRecipient(event.target.value); setHeaders(null) }} autoComplete="off" />
+            <Button type="submit" disabled={generating || !recipient.trim()}>{generating ? "Generating…" : "Generate headers"}</Button>
+          </form>
+          {headerError && <p role="alert" className="text-sm text-danger">{headerError}</p>}
+          {headers && <div className="space-y-3"><pre className="whitespace-pre-wrap break-all rounded-md border bg-muted p-3 font-mono text-xs">{headers}</pre><Button variant="outline" onClick={copyHeaders}>Copy headers</Button></div>}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -15,7 +15,8 @@ export default function DashboardLayout({
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex h-dvh overflow-hidden bg-background">
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-card focus:p-3">Skip to content</a>
       <Sidebar mobileOpen={sidebarOpen} onMobileOpenChange={setSidebarOpen} />
       <DashboardShell
         onAddDomain={() => setShowWizard(true)}

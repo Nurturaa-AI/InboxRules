@@ -106,7 +106,7 @@ export default function SettingsPage() {
   const { user } = useUser()
   const userEmail = user?.emailAddresses?.[0]?.emailAddress || ""
 
-  const { data: channelsData, loading } = useApiQuery<Channels>(
+  const { data: channelsData, loading, error, refetch } = useApiQuery<Channels>(
     "/alerts/channels"
   )
 
@@ -120,7 +120,7 @@ export default function SettingsPage() {
   // the React-recommended "adjust state during render" pattern, no effect.
   const [seededFrom, setSeededFrom] = useState<Channels | null>(null)
 
-  if (!loading && channelsData !== seededFrom) {
+  if (!loading && !error && channelsData !== seededFrom) {
     setSeededFrom(channelsData)
     setChannels(
       channelsData
@@ -158,14 +158,14 @@ export default function SettingsPage() {
         title="Settings"
         description="Choose how and when InboxRules notifies you"
         action={
-          <Button onClick={handleSave} disabled={saving || !channels}>
+          <Button onClick={handleSave} disabled={saving || loading || !!error || !channels}>
             <Save />
             {saving ? "Saving…" : "Save changes"}
           </Button>
         }
       />
 
-      {!channels ? (
+      {error ? (<div role="alert" className="space-y-3 rounded-lg border border-border bg-card p-5 text-sm"><p>Could not load notification settings. {error}</p><Button variant="outline" onClick={refetch}>Try again</Button></div>) : loading || !channels ? (
         <LoadingSkeleton variant="card" count={2} />
       ) : (
         <>

@@ -1,4 +1,6 @@
 node_modules
+CLAUDE.md
+.agents
 
 # Next.js build output
 .next/

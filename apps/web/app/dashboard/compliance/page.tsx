@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useState, Suspense } from "react"
+import { useSearchParams } from "next/navigation"
 import { useAuth } from "@clerk/nextjs"
 import { toast } from "sonner"
 import {
@@ -44,6 +45,7 @@ interface Domain {
   unsubStatus?: "active" | "inactive" | "unknown" | null
   unsubEnabled?: boolean
   detectedEsp: string | null
+  lastCheckedAt: string | null
   healthScore: number
   spfStatus: string
   dkimStatus: string
@@ -75,10 +77,12 @@ interface Domain {
 
 /** Small status icon paired with a label (never color-only). */
 function CheckIcon({ status }: { status: string }) {
-  const kind = statusFromString(status)
+  const kind = statusFromString(status === "none" || status === "missing" ? "fail" : status)
   if (kind === "success")
     return <CheckCircle className="size-3.5 text-success" aria-label="Pass" />
-  if (kind === "danger" || kind === "neutral")
+  if (kind === "neutral" || kind === "pending")
+    return <Shield className="size-3.5 text-muted-foreground" aria-label="Not checked" />
+  if (kind === "danger")
     return <XCircle className="size-3.5 text-danger" aria-label="Fail" />
   return <ShieldAlert className="size-3.5 text-warning" aria-label="Warning" />
 }
@@ -217,19 +221,21 @@ function OptionalSignalBlock({
         <p className="text-xs text-muted-foreground">
           {isNone
             ? "No record published. This signal is optional — publishing it improves deliverability and trust."
-            : "No scan data yet."}
+            : status === "error" ? "The DNS lookup failed. Run another scan to verify this record." : "No verified record is available. Review the check status."}
         </p>
       )}
     </div>
   )
 }
 
-export default function CompliancePage() {
+function ComplianceContent() {
   const { getToken } = useAuth()
   const { data, loading, error, refetch } = useApiQuery<Domain[]>(
     "/domains?limit=100&include=snapshots,changeEvents"
   )
-  const [expanded, setExpanded] = useState<string | null>(null)
+  const searchParams = useSearchParams()
+  const [expanded, setExpanded] = useState<string | null | undefined>(undefined)
+  const selectedDomain = expanded === undefined ? searchParams.get("domain") : expanded
   const [togglingUnsub, setTogglingUnsub] = useState<string | null>(null)
 
   // Enable/disable RFC 8058 one-click unsubscribe for a domain, then refresh
@@ -262,11 +268,11 @@ export default function CompliancePage() {
 
   const domains = data || []
   // Canonical thresholds (shared with HealthScore): ≥80 healthy, ≥60 warning, <60 critical.
-  const compliant = domains.filter((d) => d.healthScore >= 80).length
+  const compliant = domains.filter((d) => d.lastCheckedAt && d.healthScore >= 80).length
   const warning = domains.filter(
-    (d) => d.healthScore >= 60 && d.healthScore < 80
+    (d) => d.lastCheckedAt && d.healthScore >= 60 && d.healthScore < 80
   ).length
-  const critical = domains.filter((d) => d.healthScore < 60).length
+  const critical = domains.filter((d) => d.lastCheckedAt && d.healthScore < 60).length
 
   return (
     <div className="space-y-6">
@@ -290,27 +296,27 @@ export default function CompliancePage() {
         <MetricCard
           variant="primary"
           label="Total"
-          value={loading ? "—" : domains.length}
+          value={loading || error ? "—" : domains.length}
           icon={LayoutGrid}
         />
         <MetricCard
           variant="success"
-          label="Compliant"
-          value={loading ? "—" : compliant}
+          label="Health score ≥ 80"
+          value={loading || error ? "—" : compliant}
           icon={ShieldCheck}
           hint="Score ≥ 80"
         />
         <MetricCard
           variant="warning"
           label="Warning"
-          value={loading ? "—" : warning}
+          value={loading || error ? "—" : warning}
           icon={ShieldAlert}
           hint="Score 60–79"
         />
         <MetricCard
           variant="danger"
           label="Critical"
-          value={loading ? "—" : critical}
+          value={loading || error ? "—" : critical}
           icon={ShieldX}
           hint="Score < 60"
         />
@@ -352,7 +358,7 @@ export default function CompliancePage() {
             )
               ? (snap.dkimSelectors as DkimSelector[])
               : []
-            const isExpanded = expanded === d.id
+            const isExpanded = selectedDomain === d.id
             const panelId = `compliance-detail-${d.id}`
 
             return (
@@ -381,24 +387,13 @@ export default function CompliancePage() {
                   </div>
 
                   <div className="hidden items-center gap-2 md:flex">
-                    <AuthStatusBadge status={d.spfStatus} />
-                    <AuthStatusBadge status={d.dkimStatus} />
-                    <AuthStatusBadge status={d.dmarcStatus} />
-                  </div>
-
-                  {/* Optional signals — shown at lg+ so the md row stays tight */}
-                  <div className="hidden items-center gap-2 lg:flex">
-                    {OPTIONAL_SIGNALS.map((s) => (
-                      <OptionalSignalBadge
-                        key={s.key}
-                        label={s.label}
-                        status={d[s.statusKey]}
-                      />
-                    ))}
+                    <AuthStatusBadge protocol="SPF" status={d.spfStatus} />
+                    <AuthStatusBadge protocol="DKIM" status={d.dkimStatus} />
+                    <AuthStatusBadge protocol="DMARC" status={d.dmarcStatus} />
                   </div>
 
                   <HealthScore
-                    score={d.healthScore}
+                    score={d.lastCheckedAt ? d.healthScore : null}
                     variant="text"
                     className="min-w-[2.5rem] text-right text-lg"
                   />
@@ -423,11 +418,11 @@ export default function CompliancePage() {
                         shown twice. Core three: below md. Optional trio: below lg. */}
                     <div className="mb-4 flex flex-wrap items-center gap-2">
                       <div className="flex flex-wrap items-center gap-2 md:hidden">
-                        <AuthStatusBadge status={d.spfStatus} />
-                        <AuthStatusBadge status={d.dkimStatus} />
-                        <AuthStatusBadge status={d.dmarcStatus} />
+                        <AuthStatusBadge protocol="SPF" status={d.spfStatus} />
+                        <AuthStatusBadge protocol="DKIM" status={d.dkimStatus} />
+                        <AuthStatusBadge protocol="DMARC" status={d.dmarcStatus} />
                       </div>
-                      <div className="flex flex-wrap items-center gap-2 lg:hidden">
+                      <div className="flex flex-wrap items-center gap-2">
                         {OPTIONAL_SIGNALS.map((s) => (
                           <OptionalSignalBadge
                             key={s.key}
@@ -440,8 +435,7 @@ export default function CompliancePage() {
 
                     {!snap ? (
                       <p className="py-5 text-center text-sm text-muted-foreground">
-                        No scan data yet. Click &quot;Scan&quot; on the domain to
-                        run a check.
+                        No scan has completed yet. Run a scan from Domains; this is not a configuration failure.
                       </p>
                     ) : (
                       <div className="grid gap-4 md:grid-cols-2">
@@ -456,7 +450,7 @@ export default function CompliancePage() {
                             </code>
                           ) : (
                             <p className="mb-2.5 text-xs text-danger">
-                              No SPF record found
+                              {snap.spfResult === "error" || snap.spfResult === "unknown" ? "SPF could not be verified. Review the check status and run another scan." : "No SPF record found in this scan."}
                             </p>
                           )}
                           <p className="mb-1 text-xs text-muted-foreground">
@@ -467,9 +461,9 @@ export default function CompliancePage() {
                               <div
                                 className={cn(
                                   "h-full rounded-full",
-                                  (snap.spfLookupCount || 0) >= 8
+                                  (snap.spfLookupCount || 0) > 10
                                     ? "bg-danger"
-                                    : (snap.spfLookupCount || 0) >= 6
+                                    : (snap.spfLookupCount || 0) >= 8
                                       ? "bg-warning"
                                       : "bg-success"
                                 )}
@@ -481,7 +475,7 @@ export default function CompliancePage() {
                             <span
                               className={cn(
                                 "font-mono text-xs font-semibold",
-                                (snap.spfLookupCount || 0) >= 8
+                                (snap.spfLookupCount || 0) > 10
                                   ? "text-danger"
                                   : "text-success"
                               )}
@@ -545,7 +539,7 @@ export default function CompliancePage() {
                             </code>
                           ) : (
                             <p className="mb-2.5 text-xs text-danger">
-                              No DMARC record found
+                              {d.dmarcStatus === "error" || d.dmarcStatus === "unknown" ? "DMARC could not be verified. Review the check status and run another scan." : "No DMARC record found in this scan."}
                             </p>
                           )}
                           {snap.dmarcPolicy && (
@@ -635,4 +629,8 @@ export default function CompliancePage() {
       )}
     </div>
   )
+}
+
+export default function CompliancePage() {
+  return <Suspense fallback={<LoadingSkeleton variant="table" count={5} />}><ComplianceContent /></Suspense>
 }

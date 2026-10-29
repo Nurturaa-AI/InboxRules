@@ -37,7 +37,7 @@ export function FilterBar<T extends string = string>({
       role="group"
       aria-label={ariaLabel}
       className={cn(
-        "inline-flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1",
+        "inline-flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-border bg-muted/40 p-1",
         className
       )}
       {...props}
@@ -51,7 +51,7 @@ export function FilterBar<T extends string = string>({
             aria-pressed={active}
             onClick={() => onValueChange(opt.value)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none",
+              "inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-md px-2.5 py-1 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none",
               active
                 ? "bg-card text-foreground shadow-xs"
                 : "text-muted-foreground hover:text-foreground"

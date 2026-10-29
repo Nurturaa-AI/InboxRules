@@ -13,7 +13,7 @@ import {
   Bell,
 } from "lucide-react"
 
-import { useApiQuery, apiRequest } from "@/lib/useApiQuery"
+import { useApiQuery, apiRequest, refreshAllQueries } from "@/lib/useApiQuery"
 import { timeAgo } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -98,7 +98,7 @@ export default function AlertsPage() {
       if (!token) throw new Error("Authentication token missing")
       await apiRequest(`/alerts/${id}/resolve`, "POST", token)
       toast.success(`Resolved: ${title}`)
-      refetch()
+      refreshAllQueries()
     } catch (err) {
       toast.error("Failed to resolve alert", {
         description: err instanceof Error ? err.message : undefined,
@@ -115,7 +115,7 @@ export default function AlertsPage() {
       if (!token) throw new Error("Authentication token missing")
       await apiRequest(`/alerts/${id}/acknowledge`, "POST", token)
       toast.success(`Acknowledged: ${title}`)
-      refetch()
+      refreshAllQueries()
     } catch (err) {
       toast.error("Failed to acknowledge alert", {
         description: err instanceof Error ? err.message : undefined,
@@ -194,7 +194,6 @@ export default function AlertsPage() {
             const isResolved = !!alert.resolvedAt
             const isExpanded = expanded === alert.id
             const title =
-              alert.aiTitle ||
               CHANGE_LABELS[alert.changeType] ||
               alert.changeType
             const panelId = `alert-detail-${alert.id}`
@@ -238,8 +237,17 @@ export default function AlertsPage() {
                     </p>
                   </div>
 
+                  <ChevronRight
+                    className={cn(
+                      "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                      isExpanded && "rotate-90"
+                    )}
+                    aria-hidden="true"
+                  />
+                </button>
+
                   {!isResolved && (
-                    <div className="flex shrink-0 items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2 border-t border-border px-5 py-3">
                       {!alert.acknowledged && (
                         <Button
                           variant="outline"
@@ -268,32 +276,14 @@ export default function AlertsPage() {
                     </div>
                   )}
 
-                  <ChevronRight
-                    className={cn(
-                      "size-3.5 shrink-0 text-muted-foreground transition-transform",
-                      isExpanded && "rotate-90"
-                    )}
-                    aria-hidden="true"
-                  />
-                </button>
 
                 {/* Expanded detail */}
                 {isExpanded && (
                   <div
                     id={panelId}
-                    className="flex flex-col gap-3 border-t border-border bg-muted/30 p-5"
+                    className="flex flex-col gap-4 border-t border-border bg-muted/30 p-5"
                   >
-                    {alert.aiSummary && (
-                      <div>
-                        <p className="mb-1.5 text-[11px] font-bold tracking-wider text-muted-foreground uppercase">
-                          What happened
-                        </p>
-                        <p className="text-sm leading-relaxed text-foreground">
-                          {alert.aiSummary}
-                        </p>
-                      </div>
-                    )}
-
+                    <p className="text-xs text-muted-foreground">Recorded finding: <span className="font-mono text-foreground">{alert.changeType}</span>. Marking an alert resolved records your review; run a domain scan to verify the configuration.</p>
                     {(alert.previousValue || alert.currentValue) && (
                       <div className="rounded-lg border border-border bg-card p-3.5">
                         {alert.previousValue && (
@@ -301,7 +291,7 @@ export default function AlertsPage() {
                             <span className="text-xs font-semibold text-muted-foreground">
                               Before:{" "}
                             </span>
-                            <code className="rounded bg-danger-subtle px-1.5 py-0.5 font-mono text-xs text-danger">
+                            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs break-all text-foreground">
                               {alert.previousValue}
                             </code>
                           </div>
@@ -311,7 +301,7 @@ export default function AlertsPage() {
                             <span className="text-xs font-semibold text-muted-foreground">
                               After:{" "}
                             </span>
-                            <code className="rounded bg-success-subtle px-1.5 py-0.5 font-mono text-xs text-success">
+                            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs break-all text-foreground">
                               {alert.currentValue}
                             </code>
                           </div>
@@ -319,10 +309,22 @@ export default function AlertsPage() {
                       </div>
                     )}
 
+                    {(alert.aiSummary || alert.aiFixSteps?.length) ? <p className="text-xs text-muted-foreground">AI generated guidance · Check suggestions against the recorded DNS evidence before applying changes.</p> : <p className="text-sm text-muted-foreground">No AI explanation is available for this finding. The recorded change is shown above.</p>}
+                    {alert.aiSummary && (
+                      <div>
+                        <p className="mb-1.5 text-[11px] font-bold tracking-wider text-muted-foreground uppercase">
+                          AI explanation
+                        </p>
+                        <p className="text-sm leading-relaxed text-foreground">
+                          {alert.aiSummary}
+                        </p>
+                      </div>
+                    )}
+
                     {alert.aiFixSteps && alert.aiFixSteps.length > 0 && (
                       <div className="rounded-lg border border-info/30 bg-info-subtle p-3.5">
                         <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-info">
-                          💡 How to fix it
+                          AI suggested next steps
                         </p>
                         <ol className="flex list-inside list-decimal flex-col gap-1.5 pl-1">
                           {alert.aiFixSteps.map((step, i) => (

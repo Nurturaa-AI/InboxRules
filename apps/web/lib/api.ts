@@ -132,7 +132,7 @@ export function useApi() {
         try {
           const parsed = JSON.parse(data);
 
-          if (event === "dns_result") onDnsResult(parsed);
+          if (event === "dns_result") onDnsResult(JSON.stringify(parsed));
           if (event === "ai_token") onAiToken(parsed.token || "");
           if (event === "done") onDone();
           if (event === "error") onError(parsed.message || "Analysis failed");

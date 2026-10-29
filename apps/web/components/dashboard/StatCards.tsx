@@ -4,6 +4,7 @@ import { Globe, ShieldCheck, AlertTriangle, Mail } from "lucide-react"
 
 import { useApiQuery } from "@/lib/useApiQuery"
 import { MetricCard } from "@/components/shared/MetricCard"
+import { Button } from "@/components/ui/button"
 import { LoadingSkeleton } from "@/components/shared/LoadingSkeleton"
 
 // Shape returned by GET /analytics/overview (the subset this widget reads).
@@ -41,11 +42,13 @@ function trendProps(pct: number | null): {
 }
 
 export default function StatCards() {
-  const { data, loading } = useApiQuery<Overview>("/analytics/overview?period=7")
+  const { data, loading, error, refetch } = useApiQuery<Overview>("/analytics/overview?period=7")
 
   if (loading) {
     return <LoadingSkeleton variant="metrics" count={4} />
   }
+
+  if (error || !data) return <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-5 text-sm"><p>Overview unavailable. {error}</p><Button variant="outline" size="sm" onClick={refetch}>Try again</Button></div>
 
   const health = data?.health
   const totalDomains = health
@@ -60,28 +63,28 @@ export default function StatCards() {
   const suppressionsTrend = trendProps(data?.suppressions.trendPct ?? null)
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       <MetricCard
         variant="primary"
         label="Total Domains"
         value={totalDomains}
         icon={Globe}
-        hint={`${healthyDomains} healthy`}
+        hint={`${healthyDomains} scoring 80 or higher`}
       />
       <MetricCard
         variant="success"
-        label="Healthy Domains"
+        label="Domains scoring 80+"
         value={healthyDomains}
         icon={ShieldCheck}
-        hint={totalDomains > 0 ? `${healthyPct}% of total` : "No domains yet"}
+        hint={totalDomains > 0 ? `${healthyPct}% of configured domains` : "No domains yet"}
       />
       <MetricCard
         variant="warning"
-        label="Active Alerts"
+        label="Unacknowledged alerts"
         value={unresolvedAlerts}
         icon={AlertTriangle}
         trendUpIsGood={false}
-        hint={unresolvedAlerts === 0 ? "All clear" : "Need attention"}
+        hint={unresolvedAlerts === 0 ? "No alerts awaiting review" : "Need attention"}
       />
       <MetricCard
         label="Unsubscribes"

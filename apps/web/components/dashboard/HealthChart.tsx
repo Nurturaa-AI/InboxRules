@@ -3,6 +3,7 @@
 import { Activity } from "lucide-react"
 
 import { useApiQuery } from "@/lib/useApiQuery"
+import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { cn, scoreToStatus } from "@/lib/utils"
 
@@ -38,7 +39,7 @@ function dayLabel(dateKey: string): string {
 }
 
 export default function HealthChart() {
-  const { data, loading } =
+  const { data, loading, error, refetch } =
     useApiQuery<HealthHistory>("/analytics/health-history?period=7")
 
   const points = data?.points ?? []
@@ -53,10 +54,10 @@ export default function HealthChart() {
           <h2 className="text-sm font-semibold tracking-tight text-foreground">
             Health Trend
           </h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">7-day average</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">Last 7 days · daily scan average · score / 100 · UTC</p>
         </div>
-        {points.length > 0 && (
-          <span className="rounded-md bg-success-subtle px-2.5 py-1 font-mono text-sm font-semibold text-success">
+        {!loading && !error && points.length > 0 && (
+          <span className="rounded-md bg-muted px-2.5 py-1 font-mono text-sm font-semibold text-foreground">
             {avg}/100
           </span>
         )}
@@ -73,7 +74,7 @@ export default function HealthChart() {
               />
             ))}
           </div>
-        ) : points.length === 0 ? (
+        ) : error ? (<div role="alert" className="space-y-3 text-sm"><p>Could not load scan history. {error}</p><Button variant="outline" size="sm" onClick={refetch}>Try again</Button></div>) : points.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-6 text-center">
             <Activity className="size-7 text-muted-foreground" />
             <p className="text-sm font-semibold text-foreground">
@@ -85,19 +86,22 @@ export default function HealthChart() {
           </div>
         ) : (
           <>
-            <div className="flex h-24 items-end gap-2">
+            <div className="flex h-40 items-end gap-2">
               {points.map((p) => (
                 <div
                   key={p.date}
                   className="flex h-full flex-1 flex-col items-center justify-end gap-1"
                 >
+                  <span className="font-mono text-xs text-muted-foreground">{p.score}</span>
                   <div
+                    role="img"
+                    aria-label={`${p.date}: ${p.score} out of 100, ${p.sampleCount} scans`}
                     title={`${p.date}: ${p.score}/100 (${p.sampleCount} scan${p.sampleCount !== 1 ? "s" : ""})`}
                     className={cn(
                       "w-full rounded-t-md transition-opacity hover:opacity-75",
                       BAR_BG[scoreToStatus(p.score)]
                     )}
-                    style={{ height: `${p.score}%`, minHeight: 4 }}
+                    style={{ height: `${p.score * 0.7}%`, flexShrink: 0, minHeight: 4 }}
                   />
                   <span className="mt-1 font-mono text-[10px] text-muted-foreground">
                     {dayLabel(p.date)}
@@ -106,6 +110,7 @@ export default function HealthChart() {
               ))}
             </div>
 
+            <p className="mt-3 text-xs text-muted-foreground">Days without completed scans are omitted.</p>
             <div className="mt-4 flex flex-wrap justify-center gap-4">
               {LEGEND.map((item) => (
                 <div key={item.label} className="flex items-center gap-1.5">
