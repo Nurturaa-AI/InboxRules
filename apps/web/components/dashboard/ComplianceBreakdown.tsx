@@ -12,6 +12,7 @@ import {
 import type { LucideIcon } from "lucide-react"
 
 import { useApiQuery } from "@/lib/useApiQuery"
+import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { cn, scoreToStatus } from "@/lib/utils"
 
@@ -52,7 +53,7 @@ const STATUS_BAR: Record<ReturnType<typeof scoreToStatus>, string> = {
 }
 
 export default function ComplianceBreakdown() {
-  const { data, loading } = useApiQuery<ComplianceSummary>(
+  const { data, loading, error, refetch } = useApiQuery<ComplianceSummary>(
     "/analytics/compliance-summary"
   )
 
@@ -62,9 +63,9 @@ export default function ComplianceBreakdown() {
     <Card className="gap-0 overflow-hidden p-0">
       <div className="flex items-center justify-between border-b border-border px-5 py-4">
         <h2 className="text-sm font-semibold tracking-tight text-foreground">
-          Compliance Breakdown
+          Authentication coverage
         </h2>
-        {data && data.total > 0 && (
+        {!loading && !error && data && data.total > 0 && (
           <span className="font-mono text-xs text-muted-foreground tabular-nums">
             {data.scanned}/{data.total} scanned
           </span>
@@ -83,14 +84,14 @@ export default function ComplianceBreakdown() {
             </div>
           ))}
         </div>
-      ) : !data || data.total === 0 ? (
+      ) : error ? (<div role="alert" className="space-y-3 p-5 text-sm"><p>Could not load authentication coverage. {error}</p><Button variant="outline" size="sm" onClick={refetch}>Try again</Button></div>) : !data || data.total === 0 ? (
         <div className="flex flex-col items-center gap-2 px-5 py-8 text-center">
           <ShieldQuestion className="size-7 text-muted-foreground" />
           <p className="text-sm font-semibold text-foreground">
-            No compliance data yet
+            No authentication data yet
           </p>
           <p className="text-xs text-muted-foreground">
-            Add and scan a domain to see compliance.
+            Add and scan a domain to inspect its published records.
           </p>
         </div>
       ) : (
@@ -121,11 +122,11 @@ export default function ComplianceBreakdown() {
                       STATUS_TEXT[status]
                     )}
                   >
-                    {signal.pass}/{signal.total}
+                    {signal.pass}/{signal.total} pass
                   </span>
                 </div>
                 <p className="mt-0.5 mb-1.5 text-xs text-muted-foreground">
-                  {meta?.desc ?? signal.key}
+                  {meta?.desc ?? signal.key}{["bimi", "mtaSts", "tlsRpt"].includes(signal.key) ? " · Optional signal" : ""}
                 </p>
                 <div className="h-1 overflow-hidden rounded-full bg-border">
                   <div

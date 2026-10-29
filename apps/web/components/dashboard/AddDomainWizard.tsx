@@ -1,22 +1,19 @@
 "use client"
 
 import { useState } from "react"
-import { useAuth } from "@clerk/nextjs"
-import { toast } from "sonner"
+import Link from "next/link"
+import { useApi } from "@/lib/api"
+import { refreshAllQueries } from "@/lib/useApiQuery"
 import {
   CheckCircle,
   RefreshCw,
   ArrowRight,
-  Copy,
-  Check,
   FileText,
   KeyRound,
   ShieldCheck,
   Sparkles,
   Bell,
-  Users,
   Mail,
-  PartyPopper,
 } from "lucide-react"
 
 import {
@@ -57,8 +54,6 @@ interface Domain {
   createdAt?: string
   [key: string]: unknown
 }
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4500"
 
 const STEP_TITLES: Record<number, string> = {
   1: "Add New Domain",
@@ -139,7 +134,7 @@ function StepDots({ step }: { step: number }) {
 }
 
 export default function AddDomainWizard({ onClose, onDomainAdded }: Props) {
-  const { getToken } = useAuth()
+  const api = useApi()
 
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1)
   const [domain, setDomain] = useState("")
@@ -149,7 +144,7 @@ export default function AddDomainWizard({ onClose, onDomainAdded }: Props) {
   const [dnsResult, setDnsResult] = useState<DNSResult | null>(null)
   const [aiDiagnosis, setAiDiagnosis] = useState("")
   const [scanComplete, setScanComplete] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
   const [progress, setProgress] = useState({
     spfDone: false,
     dkimDone: false,
@@ -179,33 +174,14 @@ export default function AddDomainWizard({ onClose, onDomainAdded }: Props) {
     setLoading(true)
 
     try {
-      const token = await getToken()
-      if (!token) {
-        throw new Error("Authentication token not available")
-      }
-
-      // 1. Add domain to database
-      const addResponse = await fetch(`${API_URL}/api/v1/domains`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ domain: cleaned }),
-      })
-
-      const addData = await addResponse.json()
-
-      if (!addResponse.ok) {
-        throw new Error(addData.error?.message || "Failed to add domain")
-      }
-
+      const addData = await api.post<{ data: Domain }>("/domains", { domain: cleaned })
+      refreshAllQueries()
       setAddedDomain(addData.data)
       setStep(2)
       setLoading(false)
 
       // 2. Start streaming DNS analysis
-      startAnalysis(cleaned, token)
+      startAnalysis(cleaned)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err ?? "")
       setError(msg || "Failed to add domain. Please try again.")
@@ -213,113 +189,31 @@ export default function AddDomainWizard({ onClose, onDomainAdded }: Props) {
     }
   }
 
-  // Stream DNS analysis via SSE
-  async function startAnalysis(domainName: string, token: string) {
-    try {
-      const response = await fetch(`${API_URL}/api/v1/ai/analyze`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          Accept: "text/event-stream",
-        },
-        body: JSON.stringify({ domain: domainName }),
-      })
-
-      if (!response.ok || !response.body) {
-        // Even if AI fails, mark scan complete so user can proceed
-        setScanComplete(true)
-        setProgress({
-          spfDone: true,
-          dkimDone: true,
-          dmarcDone: true,
-          aiDone: true,
-        })
-        setTimeout(() => setStep(3), 800)
-        return
-      }
-
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ""
-      let aiText = ""
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const messages = buffer.split("\n\n")
-        buffer = messages.pop() || ""
-
-        for (const message of messages) {
-          if (!message.trim()) continue
-
-          const lines = message.split("\n")
-          let event = "message"
-          let data = ""
-
-          for (const line of lines) {
-            if (line.startsWith("event: ")) event = line.substring(7).trim()
-            if (line.startsWith("data: ")) data = line.substring(6).trim()
-          }
-
-          if (!data) continue
-
-          try {
-            const parsed = JSON.parse(data)
-
-            if (event === "dns_result") {
-              setDnsResult(parsed)
-              setProgress((p) => ({
-                ...p,
-                spfDone: true,
-                dkimDone: true,
-                dmarcDone: true,
-              }))
-            }
-            if (event === "ai_token") {
-              aiText += parsed.token || ""
-              setAiDiagnosis(aiText)
-            }
-            if (event === "done") {
-              setProgress((p) => ({ ...p, aiDone: true }))
-              setScanComplete(true)
-              setTimeout(() => setStep(3), 600)
-            }
-            if (event === "error") {
-              setScanComplete(true)
-              setProgress((p) => ({ ...p, aiDone: true }))
-              setTimeout(() => setStep(3), 600)
-            }
-          } catch {
-            /* ignore parse errors */
-          }
-        }
-      }
-    } catch {
-      // Network error — still advance
+  // Keep recorded DNS results separate from generated explanation and stream failures.
+  async function startAnalysis(domainName: string) {
+    let finished = false
+    function finish(message?: string) {
+      finished = true
+      if (message) setAnalysisError(message)
       setScanComplete(true)
-      setProgress({
-        spfDone: true,
-        dkimDone: true,
-        dmarcDone: true,
-        aiDone: true,
-      })
-      setTimeout(() => setStep(3), 800)
+      setStep(3)
     }
-  }
-
-  function copyHeaders() {
-    if (!addedDomain) return
-    const text =
-      `List-Unsubscribe: <https://unsub.inboxrules.io/${addedDomain.id}>, ` +
-      `<mailto:unsubscribe@${cleanDomain(domain)}?subject=unsubscribe>\n` +
-      `List-Unsubscribe-Post: List-Unsubscribe=One-Click`
-    navigator.clipboard.writeText(text)
-    setCopied(true)
-    toast.success("Headers copied to clipboard")
-    setTimeout(() => setCopied(false), 2000)
+    try {
+      await api.streamAnalysis(
+        domainName,
+        (result) => {
+          const parsed: DNSResult = JSON.parse(result)
+          setDnsResult(parsed)
+          setProgress((p) => ({ ...p, spfDone: true, dkimDone: true, dmarcDone: true }))
+        },
+        (token) => setAiDiagnosis((text) => text + token),
+        () => { setProgress((p) => ({ ...p, aiDone: true })); finish() },
+        (message) => finish(message),
+      )
+      if (!finished) finish("Analysis ended before completion. Review the saved domain and run a new scan.")
+    } catch (err) {
+      finish(err instanceof Error ? err.message : "Analysis is unavailable. Your domain has been saved.")
+    }
   }
 
   const score = dnsResult?.overallScore ?? 0
@@ -444,10 +338,10 @@ export default function AddDomainWizard({ onClose, onDomainAdded }: Props) {
                   className="size-2 animate-pulse rounded-full bg-info"
                   aria-hidden="true"
                 />
-                <span className="font-mono text-sm font-semibold text-info-foreground">
+                <span className="font-mono text-sm font-semibold text-foreground">
                   {cleanDomain(domain)}
                 </span>
-                <span className="text-xs text-info-foreground/80">
+                <span className="text-xs text-foreground/80">
                   — scanning in progress
                 </span>
               </div>
@@ -555,12 +449,13 @@ export default function AddDomainWizard({ onClose, onDomainAdded }: Props) {
           {step === 3 && (
             <div className="flex flex-col gap-4">
               {/* Score summary */}
-              <Card size="sm" className="flex-row items-center gap-5 bg-muted/40 p-4">
+              {analysisError && <p role="alert" className="rounded-md border border-danger/30 bg-danger-subtle p-3 text-sm text-danger">{analysisError}</p>}
+              {dnsResult ? <Card size="sm" className="flex-row items-center gap-5 bg-muted/40 p-4">
                 <ScoreRing score={score} />
                 <div className="flex-1">
                   <p className={cn("text-lg font-bold", scoreText)}>
                     {score >= 80
-                      ? "Looking good!"
+                      ? "DNS health score ≥ 80"
                       : score >= 60
                         ? "Needs attention"
                         : "Critical issues found"}
@@ -590,6 +485,8 @@ export default function AddDomainWizard({ onClose, onDomainAdded }: Props) {
                   </div>
                 </div>
               </Card>
+
+              : <Card className="p-4"><p className="text-sm text-muted-foreground">No DNS results available from this analysis. Your domain is saved. Open Domains to check the background scan.</p></Card>}
 
               {/* DNS Details */}
               {dnsResult && (
@@ -657,65 +554,36 @@ export default function AddDomainWizard({ onClose, onDomainAdded }: Props) {
               {/* AI Analysis */}
               {aiDiagnosis && (
                 <div className="rounded-xl border border-info/30 bg-info-subtle p-4">
-                  <p className="mb-3 flex items-center gap-1.5 text-[11px] font-bold tracking-wider text-info-foreground uppercase">
+                  <p className="mb-3 flex items-center gap-1.5 text-[11px] font-bold tracking-wider text-foreground uppercase">
                     <Sparkles className="size-3.5" aria-hidden="true" />
-                    AI Analysis
+                    AI generated explanation
                   </p>
-                  <div className="text-sm leading-relaxed whitespace-pre-wrap text-info-foreground">
+                  <p className="mb-3 text-xs text-muted-foreground">Generated suggestions. Verify against the DNS findings before applying changes.</p>
+                  <div className="text-sm leading-relaxed whitespace-pre-wrap text-foreground">
                     {aiDiagnosis}
                   </div>
                 </div>
               )}
 
-              {/* Unsubscribe headers */}
-              {addedDomain && (
-                <Card size="sm" className="gap-0 p-4">
-                  <p className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-foreground">
-                    <Mail className="size-4" aria-hidden="true" />
-                    Your List-Unsubscribe Headers
-                  </p>
-                  <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
-                    Add these to every marketing email from {cleanDomain(domain)}{" "}
-                    to comply with Gmail and Yahoo requirements.
-                  </p>
-                  <div className="relative rounded-lg border border-border bg-muted/40 px-3.5 py-2.5">
-                    <code className="block pr-9 font-mono text-xs leading-relaxed break-all text-foreground">
-                      List-Unsubscribe: &lt;https://unsub.inboxrules.io/
-                      {addedDomain.id}&gt;, &lt;mailto:unsubscribe@
-                      {cleanDomain(domain)}?subject=unsubscribe&gt;
-                      <br />
-                      List-Unsubscribe-Post: List-Unsubscribe=One-Click
-                    </code>
-                    <Button
-                      variant="outline"
-                      size="icon-xs"
-                      onClick={copyHeaders}
-                      aria-label="Copy unsubscribe headers"
-                      className="absolute top-2 right-2"
-                    >
-                      {copied ? (
-                        <Check className="text-success" />
-                      ) : (
-                        <Copy />
-                      )}
-                    </Button>
-                  </div>
-                </Card>
-              )}
+              <Card size="sm" className="gap-2 p-4">
+                <p className="text-sm font-semibold">Configure one-click unsubscribe</p>
+                <p className="text-sm text-muted-foreground">Enable the endpoint in Compliance, then generate signed headers for each recipient from Unsubscribe.</p>
+                <Link href="/dashboard/unsubscribe" onClick={onClose} className="text-sm font-medium text-primary underline">Open unsubscribe setup</Link>
+              </Card>
             </div>
           )}
 
           {/* ── STEP 4 — Done ── */}
           {step === 4 && (
             <div className="flex flex-col items-center gap-5 py-5 text-center">
-              <PartyPopper className="size-12 text-primary" aria-hidden="true" />
+              <CheckCircle className="size-10 text-primary" aria-hidden="true" />
               <div>
                 <h3 className="mb-2 text-xl font-bold text-foreground">
                   {cleanDomain(domain)} is now being monitored
                 </h3>
                 <p className="text-sm leading-relaxed text-muted-foreground">
-                  InboxRules will check your DNS records every 6 hours and alert
-                  you immediately if anything changes or breaks.
+                  Your domain is saved. Scheduled checks follow your subscription.
+                  Review completed scans in Domains and configure notifications in Settings.
                 </p>
               </div>
 
@@ -731,17 +599,12 @@ export default function AddDomainWizard({ onClose, onDomainAdded }: Props) {
                     {
                       icon: Mail,
                       title: "Add unsubscribe headers",
-                      desc: "Copy the List-Unsubscribe headers to your email templates",
+                      desc: "Generate signed headers for each recipient in Unsubscribe",
                     },
                     {
                       icon: Bell,
                       title: "Set up Slack alerts",
                       desc: "Get notified in Slack when something breaks",
-                    },
-                    {
-                      icon: Users,
-                      title: "Invite your team",
-                      desc: "Add team members to monitor domains together",
                     },
                   ].map((item) => (
                     <li key={item.title} className="flex items-start gap-3">

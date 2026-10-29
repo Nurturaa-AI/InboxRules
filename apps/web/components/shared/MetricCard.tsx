@@ -30,6 +30,7 @@ export function MetricCard({
   trendUpIsGood = true,
   hint,
   className,
+  variant,
   ...props
 }: MetricCardProps) {
   const isGood =
@@ -42,19 +43,19 @@ export function MetricCard({
 
   return (
     <Card
-      className={cn("gap-3 p-5", className)}
+      className={cn("min-w-0 gap-3 border-t-2 bg-card p-4 sm:p-5", variant === "danger" ? "border-t-danger" : variant === "warning" ? "border-t-warning" : "border-t-border", className)}
       {...props}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-medium text-muted-foreground">{label}</span>
+        <span className="text-xs font-medium text-muted-foreground sm:text-sm">{label}</span>
         {Icon && (
-          <span className="flex size-8 items-center justify-center rounded-md bg-muted text-muted-foreground [&_svg]:size-4">
+          <span className="flex size-6 items-center justify-center text-muted-foreground [&_svg]:size-4">
             <Icon aria-hidden="true" />
           </span>
         )}
       </div>
       <div className="flex items-end gap-2">
-        <span className="text-2xl font-semibold tracking-tight text-foreground tabular-nums">
+        <span className="font-mono text-3xl font-medium tracking-tight text-foreground tabular-nums">
           {value}
         </span>
         {delta != null && (

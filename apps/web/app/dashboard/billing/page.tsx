@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { EmptyState } from "@/components/shared/EmptyState"
 import { PageHeader } from "@/components/shared/PageHeader"
 import { LoadingSkeleton } from "@/components/shared/LoadingSkeleton"
 
@@ -119,7 +120,7 @@ export default function BillingPage() {
   const { getToken } = useAuth()
 
   // Fetch billing data — returns { subscription, usage } inside data
-  const { data, loading, refetch } = useApiQuery<BillingResponse>("/billing")
+  const { data, loading, error, refetch } = useApiQuery<BillingResponse>("/billing")
 
   const [upgrading, setUpgrading] = useState<string | null>(null)
   const [portalLoading, setPortalLoading] = useState(false)
@@ -240,7 +241,7 @@ export default function BillingPage() {
           <LoadingSkeleton variant="metrics" count={4} />
           <LoadingSkeleton variant="card" count={1} />
         </div>
-      ) : (
+      ) : error || !data ? (<Card className="p-5"><EmptyState icon={CreditCard} title="Billing information unavailable" description={error ?? "Could not load your subscription."} action={<Button variant="outline" onClick={refetch}>Try again</Button>} /></Card>) : (
         <>
           {/* ── Current plan banner ── */}
           <Card variant="primary" className="gap-0 p-0">

@@ -3,12 +3,11 @@
 import * as React from "react"
 import { usePathname } from "next/navigation"
 import Link from "next/link"
-import { useAuth } from "@clerk/nextjs"
+import { useApiQuery } from "@/lib/useApiQuery"
 import { useTheme } from "next-themes"
 import { Sun, Moon, Bell, Plus, CheckCircle2, Menu } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { SearchInput } from "@/components/shared/SearchInput"
 import { StatusBadge, statusFromString } from "@/components/shared/StatusBadge"
 import {
   DropdownMenu,
@@ -32,7 +31,7 @@ interface AlertNotification {
 
 const PAGE_META: Record<string, { title: string; sub: string }> = {
   "/dashboard": {
-    title: "Dashboard",
+    title: "Overview",
     sub: "Your email compliance and deliverability overview",
   },
   "/dashboard/domains": {
@@ -72,21 +71,17 @@ const CHANGE_LABELS: Record<string, string> = {
   dmarc_record_removed: "DMARC Record Removed",
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4500"
-
 // Stable no-op subscribe for the mounted flag — the value never changes after
 // the initial client render, so there's nothing to subscribe to.
 const subscribeNoop = () => () => {}
 
 export default function Header({ onAddDomain, onMenuClick }: Props) {
   const pathname = usePathname()
-  const { getToken } = useAuth()
   const { resolvedTheme, setTheme } = useTheme()
   const meta = PAGE_META[pathname] ?? PAGE_META["/dashboard"]
 
-  const [search, setSearch] = React.useState("")
-  const [notifications, setNotifications] = React.useState<AlertNotification[]>([])
-  const [notifLoading, setNotifLoading] = React.useState(false)
+  const { data, loading: notifLoading, error: notifError } = useApiQuery<AlertNotification[]>("/alerts?status=unresolved&limit=5")
+  const notifications = data ?? []
 
   // next-themes can't know the theme during SSR, so `resolvedTheme` is undefined
   // on the server and on the first client render. This hydration-safe flag reads
@@ -97,34 +92,6 @@ export default function Header({ onAddDomain, onMenuClick }: Props) {
     () => true,
     () => false,
   )
-
-  // Fetch unresolved alerts once on mount so the dot reflects real unread count.
-  React.useEffect(() => {
-    let cancelled = false
-    async function loadNotifications() {
-      setNotifLoading(true)
-      try {
-        const token = await getToken()
-        const response = await fetch(
-          `${API_URL}/api/v1/alerts?status=unresolved&limit=5`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        )
-        if (response.ok) {
-          const data = await response.json()
-          const items: AlertNotification[] = data.data || data.items || []
-          if (!cancelled) setNotifications(items)
-        }
-      } catch {
-        /* fail silently */
-      } finally {
-        if (!cancelled) setNotifLoading(false)
-      }
-    }
-    loadNotifications()
-    return () => {
-      cancelled = true
-    }
-  }, [getToken])
 
   const isDark = resolvedTheme === "dark"
   const hasUnread = notifications.length > 0
@@ -144,9 +111,9 @@ export default function Header({ onAddDomain, onMenuClick }: Props) {
 
       {/* Page title */}
       <div className="min-w-0 flex-1">
-        <h1 className="truncate text-lg font-semibold tracking-tight text-foreground">
+        <p className="truncate text-sm font-medium text-foreground">
           {meta.title}
-        </h1>
+        </p>
         <p className="hidden truncate text-xs text-muted-foreground sm:block">
           {meta.sub}
         </p>
@@ -154,16 +121,6 @@ export default function Header({ onAddDomain, onMenuClick }: Props) {
 
       {/* Controls */}
       <div className="flex items-center gap-2">
-        {/* Search */}
-        <div className="hidden md:block md:w-56">
-          <SearchInput
-            value={search}
-            onValueChange={setSearch}
-            label="Search domains"
-            placeholder="Search domains…"
-          />
-        </div>
-
         {/* Theme toggle */}
         <Button
           variant="outline"
@@ -190,7 +147,7 @@ export default function Header({ onAddDomain, onMenuClick }: Props) {
               className="relative"
               aria-label={
                 hasUnread
-                  ? `Notifications, ${notifications.length} unread`
+                  ? `Notifications, ${notifications.length} recent unacknowledged alerts`
                   : "Notifications"
               }
             >
@@ -200,14 +157,14 @@ export default function Header({ onAddDomain, onMenuClick }: Props) {
               )}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-80 p-0">
+          <DropdownMenuContent align="end" className="w-[min(320px,calc(100vw-32px))] p-0">
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <p className="text-sm font-semibold text-foreground">
                 Notifications
               </p>
               {hasUnread && (
                 <span className="text-xs text-muted-foreground tabular-nums">
-                  {notifications.length} unread
+                  {notifications.length} recent
                 </span>
               )}
             </div>
@@ -216,12 +173,14 @@ export default function Header({ onAddDomain, onMenuClick }: Props) {
               <div className="px-4 py-8 text-center text-sm text-muted-foreground">
                 Loading…
               </div>
+            ) : notifError ? (
+              <p role="alert" className="p-4 text-sm text-danger">Could not load notifications. Open Alerts to retry.</p>
             ) : notifications.length === 0 ? (
               <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
                 <CheckCircle2 className="size-7 text-success" />
-                <p className="text-sm font-semibold text-foreground">All clear</p>
+                <p className="text-sm font-semibold text-foreground">No new alerts</p>
                 <p className="text-xs text-muted-foreground">
-                  No unresolved alerts right now
+                  No unacknowledged alerts right now
                 </p>
               </div>
             ) : (
@@ -233,8 +192,7 @@ export default function Header({ onAddDomain, onMenuClick }: Props) {
                   >
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-foreground">
-                        {notif.aiTitle ||
-                          CHANGE_LABELS[notif.changeType] ||
+                        {CHANGE_LABELS[notif.changeType] ||
                           notif.changeType}
                       </p>
                       {notif.domain?.domain && (

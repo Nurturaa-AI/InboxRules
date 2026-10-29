@@ -27,6 +27,7 @@ import { FilterBar } from "@/components/shared/FilterBar"
 interface Domain {
   id: string
   domain: string
+  lastCheckedAt: string | null
   healthScore: number
   spfStatus: string
   dkimStatus: string
@@ -94,21 +95,21 @@ export default function AnalyticsPage() {
   // Real current-state counts using the shared ≥80/≥60/<60 thresholds
   // (consistent with HealthScore and the per-row Status badge below).
   const domains = domainsQ.data ?? []
-  const avgScore = domains.length
-    ? Math.round(domains.reduce((a, d) => a + d.healthScore, 0) / domains.length)
+  const scanned = domains.filter((d) => d.lastCheckedAt)
+  const avgScore = scanned.length
+    ? Math.round(scanned.reduce((a, d) => a + d.healthScore, 0) / scanned.length)
     : 0
-  const healthy = domains.filter((d) => d.healthScore >= 80).length
-  const warning = domains.filter(
+  const healthy = scanned.filter((d) => d.healthScore >= 80).length
+  const warning = scanned.filter(
     (d) => d.healthScore >= 60 && d.healthScore < 80
   ).length
-  const critical = domains.filter((d) => d.healthScore < 60).length
+  const critical = scanned.filter((d) => d.healthScore < 60).length
 
   const points = historyQ.data?.points ?? []
   const periodNum = Number(period)
   const historyAvg = points.length
     ? Math.round(points.reduce((a, p) => a + p.score, 0) / points.length)
     : 0
-  const maxScore = Math.max(...points.map((p) => p.score), 1)
 
   const sortedDomains = [...domains].sort((a, b) => b.healthScore - a.healthScore)
 
@@ -126,7 +127,7 @@ export default function AnalyticsPage() {
       key: "health",
       header: "Health Score",
       className: "w-44",
-      cell: (d) => <HealthScore score={d.healthScore} size="sm" />,
+      cell: (d) => <HealthScore score={d.lastCheckedAt ? d.healthScore : null} size="sm" />,
     },
     { key: "spf", header: "SPF", cell: (d) => <AuthStatusBadge status={d.spfStatus} /> },
     { key: "dkim", header: "DKIM", cell: (d) => <AuthStatusBadge status={d.dkimStatus} /> },
@@ -137,10 +138,10 @@ export default function AnalyticsPage() {
       cell: (d) => (
         <StatusBadge
           status={statusFromString(
-            d.healthScore >= 80 ? "healthy" : d.healthScore >= 60 ? "warn" : "critical"
+            !d.lastCheckedAt ? "pending" : d.healthScore >= 80 ? "healthy" : d.healthScore >= 60 ? "warn" : "critical"
           )}
           label={
-            d.healthScore >= 80
+            !d.lastCheckedAt ? "Not scanned" : d.healthScore >= 80
               ? "Healthy"
               : d.healthScore >= 60
                 ? "Warning"
@@ -155,7 +156,7 @@ export default function AnalyticsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Analytics"
-        description="Deliverability trends and compliance data"
+        description="DNS health scores from completed scans. Scores describe configuration, not inbox placement."
         action={
           <Button
             variant="outline"
@@ -177,27 +178,27 @@ export default function AnalyticsPage() {
         <MetricCard
           variant="primary"
           label="Avg Health Score"
-          value={domainsLoading ? "—" : avgScore}
+          value={domainsLoading || domainsError ? "—" : scanned.length ? avgScore : "—"}
           icon={Activity}
         />
         <MetricCard
           variant="success"
           label="Healthy Domains"
-          value={domainsLoading ? "—" : healthy}
+          value={domainsLoading || domainsError ? "—" : healthy}
           icon={ShieldCheck}
-          hint="Score ≥ 80"
+          hint="Completed scans · score ≥ 80"
         />
         <MetricCard
           variant="warning"
           label="Needs Attention"
-          value={domainsLoading ? "—" : warning}
+          value={domainsLoading || domainsError ? "—" : warning}
           icon={AlertTriangle}
           hint="Score 60–79"
         />
         <MetricCard
           variant="danger"
-          label="Critical Issues"
-          value={domainsLoading ? "—" : critical}
+          label="Critical domains"
+          value={domainsLoading || domainsError ? "—" : critical}
           icon={XCircle}
           hint="Score < 60"
         />
@@ -208,8 +209,8 @@ export default function AnalyticsPage() {
         <CardHeader className="flex flex-col gap-3 border-b p-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <CardTitle className="text-sm">Average Health Score</CardTitle>
-            {points.length > 0 && (
-              <span className="rounded-md bg-success-subtle px-2 py-0.5 font-mono text-xs font-semibold text-success">
+            {!historyQ.loading && !historyQ.error && points.length > 0 && (
+              <span className="rounded-md bg-muted px-2 py-0.5 font-mono text-xs font-semibold text-foreground">
                 {historyAvg}/100 avg
               </span>
             )}
@@ -247,26 +248,29 @@ export default function AnalyticsPage() {
               description="Points appear here as your domains are scanned over time."
             />
           ) : (
-            <>
-              <div className="flex h-36 items-end gap-2">
+            <div className="overflow-x-auto">
+              <p className="mb-4 text-xs text-muted-foreground">Daily average · score 0–100 · dates in UTC · missing days have no scan data</p>
+              <div className="flex h-52 min-w-max items-end gap-2">
                 {points.map((p) => {
                   const status = scoreToStatus(p.score)
                   return (
                     <div
                       key={p.date}
-                      className="flex h-full flex-1 flex-col items-center justify-end gap-1.5"
+                      className="flex h-full min-w-8 flex-1 flex-col items-center justify-end gap-1.5"
                     >
                       <span className="font-mono text-[10px] font-semibold text-muted-foreground">
                         {p.score}
                       </span>
                       <div
+                        role="img"
+                        aria-label={`${p.date}: ${p.score} out of 100, ${p.sampleCount} scans`}
                         title={`${p.date}: ${p.score}/100 (${p.sampleCount} scan${p.sampleCount !== 1 ? "s" : ""})`}
                         className={cn(
                           "w-full rounded-t-md transition-opacity hover:opacity-75",
                           BAR_BG[status]
                         )}
                         style={{
-                          height: `${(p.score / maxScore) * 100}%`,
+                          height: `${p.score * 0.7}%`, flexShrink: 0,
                           minHeight: 4,
                         }}
                       />
@@ -287,7 +291,7 @@ export default function AnalyticsPage() {
                   </div>
                 ))}
               </div>
-            </>
+            </div>
           )}
         </CardContent>
       </Card>

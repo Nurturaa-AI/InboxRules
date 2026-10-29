@@ -36,6 +36,8 @@ export function useApiQuery<T>(path: string) {
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
 
+  const [pagination, setPagination] = useState<{ total: number; hasNextPage: boolean; nextCursor: string | null } | null>(null);
+
   // Re-render (and refetch) whenever a global refresh is broadcast.
   const version = useSyncExternalStore(
     subscribeRefresh,
@@ -62,6 +64,7 @@ export function useApiQuery<T>(path: string) {
       const json = await response.json();
       // Handle both { data: ... } and raw array/object responses
       setData(json.data ?? json);
+      setPagination(json.pagination ?? null);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Request failed");
     } finally {
@@ -78,7 +81,7 @@ export function useApiQuery<T>(path: string) {
     // `version` bumps on a global refresh broadcast → re-run the fetch.
   }, [refetch, version]);
 
-  return { data, loading, error, refetch };
+  return { data, loading, error, refetch, pagination };
 }
 
 export async function apiRequest(

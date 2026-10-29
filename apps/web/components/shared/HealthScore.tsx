@@ -4,7 +4,7 @@ import { cn, scoreToStatus } from "@/lib/utils"
 
 export interface HealthScoreProps extends React.ComponentProps<"div"> {
   /** Score 0–100. */
-  score: number
+  score: number | null
   variant?: "bar" | "ring" | "text"
   /** Show the numeric value. Default true. */
   showValue?: boolean
@@ -41,6 +41,8 @@ export function HealthScore({
   className,
   ...props
 }: HealthScoreProps) {
+  if (score === null) return <span className="text-xs text-muted-foreground">Not scanned</span>
+
   const clamped = Math.max(0, Math.min(100, Math.round(score)))
   const status = scoreToStatus(clamped)
 
@@ -108,6 +110,7 @@ export function HealthScore({
       <div
         className={cn("relative w-full overflow-hidden rounded-full bg-muted", barHeight)}
         role="progressbar"
+        aria-label="Domain health score"
         aria-valuenow={clamped}
         aria-valuemin={0}
         aria-valuemax={100}

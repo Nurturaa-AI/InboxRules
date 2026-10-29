@@ -20,8 +20,8 @@ export default function DashboardShell({
       {/* Scroll container. The content wrapper grows (flex-1) so that on short
           pages the footer is pushed to the bottom of the viewport, while on
           long pages it scrolls into view beneath the content. */}
-      <main className="flex flex-1 flex-col overflow-y-auto">
-        <div className="flex flex-1 flex-col gap-6 p-4 sm:p-6">{children}</div>
+      <main id="main-content" tabIndex={-1} className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+        <div className="mx-auto w-full max-w-[1600px] min-w-0 flex flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8">{children}</div>
         <Footer />
       </main>
     </div>

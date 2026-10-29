@@ -58,6 +58,8 @@ export function statusFromString(value: string | null | undefined): StatusKind {
     case "fail":
     case "failed":
     case "error":
+    case "invalid":
+    case "permerror":
     case "critical":
     case "danger":
     case "inactive":

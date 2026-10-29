@@ -1,6 +1,8 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
+import { useDomainScan } from "@/lib/useDomainScan"
 import {
   RefreshCw,
   ExternalLink,
@@ -42,13 +44,14 @@ interface Props {
   onAddDomain?: () => void
 }
 
-type Filter = "all" | "healthy" | "warning" | "critical"
+type Filter = "all" | "healthy" | "warning" | "critical" | "pending"
 
 const FILTERS: { value: Filter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "healthy", label: "Healthy" },
   { value: "warning", label: "Warning" },
   { value: "critical", label: "Critical" },
+  { value: "pending", label: "Not scanned" },
 ]
 
 export default function DomainTable({ onAddDomain }: Props) {
@@ -56,38 +59,15 @@ export default function DomainTable({ onAddDomain }: Props) {
 
   // Shared, refresh-aware query — participates in refreshAllQueries() so a
   // mutation anywhere on the dashboard re-runs this fetch automatically.
-  const { data, loading, error, refetch } = useApiQuery<Domain[]>("/domains")
+  const { data, loading, error, refetch } = useApiQuery<Domain[]>("/domains?limit=100")
   const domains = data ?? []
 
   const [filter, setFilter] = useState<Filter>("all")
-  const [scanning, setScanning] = useState<string | null>(null)
+  const { scan, scanning } = useDomainScan()
   const [deleting, setDeleting] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<Domain | null>(null)
 
   // Trigger a manual scan
-  async function handleScan(id: string, name: string) {
-    setScanning(id)
-    try {
-      const token = await getToken()
-      if (!token) throw new Error("Not authenticated")
-      await apiRequest(`/domains/${id}/scan`, "POST", token)
-      toast.success(`Scanning ${name}…`, {
-        description: "Results refresh in a few seconds.",
-      })
-      // Refresh the whole dashboard after 3s to show the updated score.
-      setTimeout(() => {
-        refreshAllQueries()
-        setScanning(null)
-      }, 3000)
-    } catch (err) {
-      toast.error("Failed to start scan", {
-        description: err instanceof Error ? err.message : undefined,
-      })
-      setScanning(null)
-    }
-  }
-
-  // Delete a domain (confirmation handled by ConfirmationDialog)
   async function handleDelete(domain: Domain) {
     setDeleting(domain.id)
     try {
@@ -107,6 +87,8 @@ export default function DomainTable({ onAddDomain }: Props) {
 
   // Filter domains
   const filtered = domains.filter((d) => {
+    if (filter === "pending") return !d.lastCheckedAt
+    if (filter !== "all" && !d.lastCheckedAt) return false
     if (filter === "healthy") return d.healthScore >= 80
     if (filter === "warning") return d.healthScore >= 60 && d.healthScore < 80
     if (filter === "critical") return d.healthScore < 60
@@ -122,10 +104,10 @@ export default function DomainTable({ onAddDomain }: Props) {
           <DomainAvatar domain={d.domain} />
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-foreground">
-              {d.domain}
+              <Link href={`/dashboard/compliance?domain=${d.id}`} className="hover:text-primary hover:underline">{d.domain}</Link>
             </p>
             <p className="truncate font-mono text-xs text-muted-foreground">
-              {d.detectedEsp || "ESP detecting…"}
+              {d.detectedEsp || "ESP not identified"}
             </p>
           </div>
         </div>
@@ -135,7 +117,7 @@ export default function DomainTable({ onAddDomain }: Props) {
       key: "health",
       header: "Health Score",
       className: "w-40",
-      cell: (d) => <HealthScore score={d.healthScore} size="sm" />,
+      cell: (d) => <HealthScore score={d.lastCheckedAt ? d.healthScore : null} size="sm" />,
     },
     {
       key: "spf",
@@ -170,18 +152,18 @@ export default function DomainTable({ onAddDomain }: Props) {
           <Button
             variant="secondary"
             size="xs"
-            onClick={() => handleScan(d.id, d.domain)}
-            disabled={scanning === d.id}
+            onClick={() => scan(d)}
+            disabled={scanning.includes(d.id)}
           >
-            <RefreshCw className={scanning === d.id ? "animate-spin" : ""} />
-            {scanning === d.id ? "Scanning" : "Scan"}
+            <RefreshCw className={scanning.includes(d.id) ? "animate-spin" : ""} />
+            {scanning.includes(d.id) ? "Awaiting scan" : "Scan"}
           </Button>
           <ActionMenu
             items={[
               {
                 label: "Open site",
                 icon: ExternalLink,
-                onClick: () => window.open(`https://${d.domain}`, "_blank"),
+                onClick: () => window.open(`https://${d.domain}`, "_blank", "noopener,noreferrer"),
               },
               {
                 label: "Remove domain",
@@ -208,7 +190,7 @@ export default function DomainTable({ onAddDomain }: Props) {
           <p className="text-xs text-muted-foreground">
             {loading
               ? "Loading…"
-              : `${domains.length} domain${domains.length !== 1 ? "s" : ""} · real-time monitoring`}
+              : `Latest checks for ${domains.length} loaded domain${domains.length !== 1 ? "s" : ""}`}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -229,7 +211,7 @@ export default function DomainTable({ onAddDomain }: Props) {
 
       {/* Filter bar */}
       {!loading && !error && domains.length > 0 && (
-        <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-2.5 sm:px-5">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-2.5 sm:px-5">
           <FilterBar
             options={FILTERS}
             value={filter}
