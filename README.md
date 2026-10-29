@@ -101,7 +101,7 @@ graph TB
 | **Database** | PostgreSQL (via Prisma driver adapter) |
 | **Queue / cache** | Redis (BullMQ queues + Fastify rate-limit store) |
 | **Auth** | Clerk (JWT verified server-side via JWKS with `jose`) |
-| **AI** | Google Gemini `gemini-2.0-flash` (`@google/genai`) |
+| **AI** | Google Gemini `gemini-3.5-flash` (`@google/genai`) |
 | **Email** | Resend |
 | **Billing** | Lemon Squeezy |
 
